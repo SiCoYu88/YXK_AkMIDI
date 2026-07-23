@@ -14,6 +14,7 @@
 UENUM(BlueprintType)
 enum class EAkMessageType : uint8
 {
+	AMT_Note_None = 0,
 	/*
 	*	Note Off Event
 	*	[Data1=Note, Data2=Velocity]
@@ -150,7 +151,7 @@ private:
 	bool bIsDirty;
 
 	UPROPERTY(Transient)
-	UAkMidiMessage* MidiMessageBackup;
+	TObjectPtr<UAkMidiMessage> MidiMessageBackup;
 };
 
 #pragma endregion
