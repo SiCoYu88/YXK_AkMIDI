@@ -1285,7 +1285,7 @@ public:
 	/**
 	 * Posts MIDI messages on a Wwise event for the specified game object.
 	 */
-	AKRESULT PostMidiEvent(
+	AkPlayingID PostMidiEvent(
 		UAkAudioEvent* in_Event,
 		AkGameObjectID in_gameObjectID,
 		AkMIDIPost* in_pPosts,

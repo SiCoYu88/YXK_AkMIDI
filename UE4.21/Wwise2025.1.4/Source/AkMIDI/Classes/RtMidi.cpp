@@ -2325,6 +2325,11 @@ void MidiOutAlsa :: sendMessage( const unsigned char *message, size_t size )
 #include <windows.h>
 #include <mmsystem.h>
 
+// Avoid leaking the WinMM PlaySound macro into Unreal headers in unity builds.
+#ifdef PlaySound
+#undef PlaySound
+#endif
+
 // Convert a null-terminated wide string or ANSI-encoded string to UTF-8.
 static std::string ConvertToUTF8(const TCHAR *str)
 {

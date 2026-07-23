@@ -4618,7 +4618,7 @@ AKRESULT FAkAudioDevice::RegisterPluginDLL(const FString& in_DllName, const FStr
 }
 
 #pragma region H3D
-AKRESULT FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts)
+AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts)
 {
 	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
 	auto* SoundEngine = IWwiseSoundEngineAPI::Get();

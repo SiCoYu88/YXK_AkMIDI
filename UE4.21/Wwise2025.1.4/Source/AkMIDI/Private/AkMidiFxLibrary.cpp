@@ -9,7 +9,7 @@ UAkMidiMessage* UAkMidiFxLibrary::Octave(UAkMidiMessage* MidiMessage, int Octave
 	if (MidiMessage == nullptr)
 		return MidiMessage;
 
-	FMath::Clamp<int>(Octave, -12, 12);
+	Octave = FMath::Clamp<int>(Octave, -12, 12);
 
 	if (MidiMessage->NoteType == EAkMessageType::AMT_Note_On)
 	{

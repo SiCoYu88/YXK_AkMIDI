@@ -185,11 +185,11 @@ bool UAkMidiComponent::PostMidiEvent()
 	
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
-	AKRESULT Res = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
+	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
 
 	Posts.Empty();
 
-	if (Res == AK_Success)
+	if (PlayingID > 0)
 		return true;
 	else
 		return false;
@@ -257,16 +257,16 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 	}
 
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
-	AKRESULT Res = AK_Fail;
+	AkPlayingID PlayingID = 0;
 	
 	if(AkEvent)
-		Res = AkAudioDevice->PostMidiEvent(AkEvent, GameObjectID, Posts.GetData(), Posts.Num());
+		PlayingID = AkAudioDevice->PostMidiEvent(AkEvent, GameObjectID, Posts.GetData(), Posts.Num());
 	else
-		Res = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
+		PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
 
 		Posts.Empty();
 
-	if (Res == AK_Success)
+	if (PlayingID > 0)
 		return true;
 	else
 		return false;
@@ -316,47 +316,47 @@ void UAkMidiComponent::MakePost(UAkMidiMessage *MIDINote)
 	
 	AkMIDIPost *Post = PostPool[PostPoolCount++];
 
-	Post->byChan = MIDINote->Channel;
+	Post->midiEvent.byChan = MIDINote->Channel;
 	Post->uOffset = MIDINote->NoteOffset;
 
 	switch (MIDINote->NoteType)
 	{
 	case EAkMessageType::AMT_Note_On:
-		Post->byType = AK_MIDI_EVENT_TYPE_NOTE_ON;
-		Post->NoteOnOff.byNote = MIDINote->Data01;
-		Post->NoteOnOff.byVelocity = MIDINote->Data02;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_ON;
+		Post->midiEvent.NoteOnOff.byNote = MIDINote->Data01;
+		Post->midiEvent.NoteOnOff.byVelocity = MIDINote->Data02;
 		break;
 	case EAkMessageType::AMT_Note_Off:
-		Post->byType = AK_MIDI_EVENT_TYPE_NOTE_OFF;
-		Post->NoteOnOff.byNote = MIDINote->Data01;
-		Post->NoteOnOff.byVelocity = MIDINote->Data02;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_OFF;
+		Post->midiEvent.NoteOnOff.byNote = MIDINote->Data01;
+		Post->midiEvent.NoteOnOff.byVelocity = MIDINote->Data02;
 		/*Post->uOffset = MIDINote->NoteOffset + AudioSettings->uNumSamplesPerFrame / 2;*/
 		break;
 	case EAkMessageType::AMT_AfterTouch:
-		Post->byType = AK_MIDI_EVENT_TYPE_NOTE_AFTERTOUCH;
-		Post->NoteAftertouch.byNote = MIDINote->Data01;
-		Post->NoteAftertouch.byValue = MIDINote->Data02;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_AFTERTOUCH;
+		Post->midiEvent.NoteAftertouch.byNote = MIDINote->Data01;
+		Post->midiEvent.NoteAftertouch.byValue = MIDINote->Data02;
 		break;
 	case EAkMessageType::AMT_CC:
-		Post->byType = AK_MIDI_EVENT_TYPE_CONTROLLER;
-		Post->Cc.byCc = MIDINote->Data01;
-		Post->Cc.byValue = MIDINote->Data02;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_CONTROLLER;
+		Post->midiEvent.Cc.byCc = MIDINote->Data01;
+		Post->midiEvent.Cc.byValue = MIDINote->Data02;
 		break;
 	case EAkMessageType::AMT_Program_Change:
-		Post->byType = AK_MIDI_EVENT_TYPE_PROGRAM_CHANGE;
-		Post->ProgramChange.byProgramNum = MIDINote->Data01;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_PROGRAM_CHANGE;
+		Post->midiEvent.ProgramChange.byProgramNum = MIDINote->Data01;
 		break;
 	case EAkMessageType::AMT_Channel_AfterTouch:
-		Post->byType = AK_MIDI_EVENT_TYPE_CHANNEL_AFTERTOUCH;
-		Post->ChanAftertouch.byValue = MIDINote->Data01;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_CHANNEL_AFTERTOUCH;
+		Post->midiEvent.ChanAftertouch.byValue = MIDINote->Data01;
 		break;
 	case EAkMessageType::AMT_Pitch_Bend:
-		Post->byType = AK_MIDI_EVENT_TYPE_PITCH_BEND;
-		Post->PitchBend.byValueLsb = MIDINote->Data01;
-		Post->PitchBend.byValueMsb = MIDINote->Data02;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_PITCH_BEND;
+		Post->midiEvent.PitchBend.byValueLsb = MIDINote->Data01;
+		Post->midiEvent.PitchBend.byValueMsb = MIDINote->Data02;
 		break;
 	default:
-		Post->byType = AK_MIDI_EVENT_TYPE_INVALID;
+		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_INVALID;
 		break;
 	}
 

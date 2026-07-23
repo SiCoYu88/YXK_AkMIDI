@@ -25,7 +25,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FRtMidiCallback, class UAkMidiMessa
 /**
  * 
  */
-UCLASS(Blueprintable, BlueprintType, ClassGroup = "AkMIDI")
+UCLASS(Blueprintable, BlueprintType, ClassGroup = "AkMIDI", meta = (BlueprintSpawnableComponent))
 class AKMIDI_API UAkMidiComponent : public UAkComponent
 {
 	GENERATED_BODY()
@@ -82,16 +82,16 @@ private:
 	FAkAudioDevice* AkAudioDevice;
 	AkAudioSettings* AudioSettings;
 
-	bool bIsOutputToWwise;
-	bool bIsInputFromUnreal;
-	bool bMidiFxOnOff;
+	bool bIsOutputToWwise = true;
+	bool bIsInputFromUnreal = true;
+	bool bMidiFxOnOff = false;
 
 	FMidiDevice DefaultInputDevice{TEXT("Unreal"), 127 };
 	FMidiDevice DefaultOutputDevice{TEXT("Wwise"), 127 };
 
 
-	uint8 MessagePoolCount;
-	uint8 PostPoolCount;
+	uint8 MessagePoolCount = 0;
+	uint8 PostPoolCount = 0;
 
 	friend class MakePostsAsync;
 
