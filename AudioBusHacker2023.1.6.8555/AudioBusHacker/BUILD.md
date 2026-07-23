@@ -13,6 +13,34 @@
 
 工程最初来自 Wwise 2023.1.6.8555。`vc170` 解决方案现已用 2025.1.4 Premake 重新生成；旧 2023 安装包保存在 `LegacyPackages`，不能安装到 Wwise 2025.1。
 
+## 批处理快捷方式
+
+完整生成、编译、文档、打包和验证流程：
+
+```bat
+build_wwise_2025_1_4.bat all
+```
+
+也可以分步运行：
+
+```bat
+build_wwise_2025_1_4.bat premake
+build_wwise_2025_1_4.bat build
+build_wwise_2025_1_4.bat docs
+build_wwise_2025_1_4.bat package
+build_wwise_2025_1_4.bat verify
+```
+
+脚本优先使用 `py -3`。若 Python 3 没有注册到 Python Launcher，先指定绝对路径；首次生成文档时可允许脚本安装依赖：
+
+```bat
+set "PYTHON_EXE=C:\Path\To\Python3\python.exe"
+set "INSTALL_DOC_DEPS=1"
+build_wwise_2025_1_4.bat all
+```
+
+运行 `build_wwise_2025_1_4.bat help` 可查看全部参数。无参数运行时默认执行 `all`。
+
 ## 2. 环境要求
 
 Wwise Launcher 中需要安装 Wwise `2025.1.4.9062` 的 Wwise Authoring、SDK 和 Windows SDK 平台包。Windows 侧还需要：
