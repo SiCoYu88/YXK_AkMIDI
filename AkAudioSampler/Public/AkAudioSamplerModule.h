@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 #include "AkAudioDevice.h"
-#include "Ak/Plugin/AkAudioBusHackerPlugin.h"
+#include "Ak/Plugin/AudioBusHackerFXFactory.h"
 
 typedef int(*SABH)(AkAudioBusHackerPluginExecuteCallbackFunc ABHfnc);
 

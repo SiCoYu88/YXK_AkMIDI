@@ -7,7 +7,7 @@
 #define DJ_FFT_IMPLEMENTATION 
 #include "dj_fft.h"
 //#include "Ak/Plugin/AudioBusHackerFXFactory.h"
-#include "Ak/Plugin/AkAudioBusHackerPlugin.h"
+#include "Ak/Plugin/AudioBusHackerFXFactory.h"
 #include "Interfaces/IPluginManager.h"
 
 //AK_DLLIMPORT void SetAudioBusHackerCallbacks(AkAudioBusHackerPluginExecuteCallbackFunc m_ABHExecCallback);
@@ -123,7 +123,7 @@ int32 UAkAudioSampler::RegisterCatchBuffer()
     //    }
     //    return 4;
     //}
-    return 5;//test;
+    // return 5;//test;
 }
 void UAkAudioSampler::StopEventByID(int32 ID)
 {
