@@ -101,9 +101,9 @@ public:
 	uint8 Channel;
 
 
-	//MIDI Note Post On The Offset Of Samples Per Frame 0-127
+	//MIDI Note Post On The Offset Of Samples From Current Frame
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AkMIDI|AkMidiMessage")
-	uint8 NoteOffset;
+	int32 NoteOffset;
 
 	/*
 	*Note Off				- Note Value

@@ -12,6 +12,7 @@
 #include "Async/AsyncWork.h"
 
 #include <vector>
+#include "Containers/Queue.h"
 
 #include "AkMidiComponent.generated.h"
 
@@ -19,8 +20,29 @@
 #define MessagePoolMax 30
 #define PostsPoolMax MessagePoolMax
 
+UENUM(BlueprintType)
+enum class EMidiInputSource : uint8
+{
+	Unreal UMETA(DisplayName = "Unreal"),
+	ExternalDevice UMETA(DisplayName = "External Device"),
+	None UMETA(DisplayName = "None")
+};
+
+UENUM(BlueprintType)
+enum class EMidiOutputTarget : uint8
+{
+	Wwise UMETA(DisplayName = "Wwise"),
+	ExternalDevice UMETA(DisplayName = "External Device"),
+	None UMETA(DisplayName = "None")
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FRtMidiCallback, class UAkMidiMessage*, MidiMessage, float, DeltaTime);
 
+struct FRawMidiPacket
+{
+	TArray<uint8> Data;
+	double DeltaTime = 0.0;
+};
 
 /**
  * 
@@ -62,10 +84,16 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
 	void MidiFxBypass(bool bIsMidiFxBypass);
 
+	UFUNCTION(BlueprintPure, Category = "AkMIDI|AkMidiComponent")
+	EMidiInputSource GetInputSource() const { return InputSource; }
+
+	UFUNCTION(BlueprintPure, Category = "AkMIDI|AkMidiComponent")
+	EMidiOutputTarget GetOutputTarget() const { return OutputTarget; }
+
 	//----------------------------------------------------
 	virtual bool PostMidiEvent();
-	bool GetIsOutputToWwise() const { return bIsOutputToWwise; }
-	bool GetIsInputFromUnreal() const { return bIsInputFromUnreal; }
+	bool GetIsOutputToWwise() const { return OutputTarget == EMidiOutputTarget::Wwise; }
+	bool GetIsInputFromUnreal() const { return InputSource == EMidiInputSource::Unreal; }
 	virtual void OnRegister() override;
 
 
@@ -82,8 +110,8 @@ private:
 	FAkAudioDevice* AkAudioDevice;
 	AkAudioSettings* AudioSettings;
 
-	bool bIsOutputToWwise = true;
-	bool bIsInputFromUnreal = true;
+	EMidiOutputTarget OutputTarget = EMidiOutputTarget::Wwise;
+	EMidiInputSource InputSource = EMidiInputSource::Unreal;
 	bool bMidiFxOnOff = false;
 
 	FMidiDevice DefaultInputDevice{TEXT("Unreal"), 127 };
@@ -93,6 +121,8 @@ private:
 	uint8 MessagePoolCount = 0;
 	uint8 PostPoolCount = 0;
 
+	TQueue<FRawMidiPacket, EQueueMode::Mpsc> IncomingMidiQueue;
+
 	friend class MakePostsAsync;
 
 
@@ -101,6 +131,8 @@ private:
 	virtual void MakePost(UAkMidiMessage *MIDINote);
 
 	void HandleWwiseCallback(AkAudioSettings* in_AudioSettings);
+
+	void ProcessIncomingMidiQueue();
 
 	void SendRawMidiMessage(std::vector<unsigned char>& RawMessage);
 	

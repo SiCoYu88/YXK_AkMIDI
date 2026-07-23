@@ -22,7 +22,7 @@ public:
 	static UAkMidiMessage* CreateAkMidiMessage(
 		EAkMessageType NoteType,
 		uint8 Channel,
-		uint8 NoteOffset,
+		int32 NoteOffset,
 		uint8 Data01,
 		uint8 Data02);
 

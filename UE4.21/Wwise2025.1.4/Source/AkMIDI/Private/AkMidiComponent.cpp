@@ -8,20 +8,14 @@ void MyCallback(double DeltaTime, std::vector<unsigned char> *Message, void *Use
 {
 	UAkMidiComponent* MidiComponent = (UAkMidiComponent*)UserData;
 
-	if (MidiComponent->GetIsInputFromUnreal())
+	if (!MidiComponent || MidiComponent->GetIsInputFromUnreal())
 		return;
 
-	if (MidiComponent)
-	{
-		if (MidiComponent->MessagePoolCount >= MessagePoolMax - 2)
-			MidiComponent->MessagePoolCount = 0;
-		UAkMidiMessage* AkMessage = MidiComponent->MessagePool[MidiComponent->MessagePoolCount++];
-		//FAutoDeleteAsyncTask<MakePostsAsync>* DispatchMessageAsync = new FAutoDeleteAsyncTask<MakePostsAsync>(MidiComponent, AkMessage, *Message, DeltaTime);
-		//DispatchMessageAsync->StartBackgroundTask();
-		HandleRtMidiCallback(AkMessage, MidiComponent, *Message, DeltaTime);
-	}
-
-	return;
+	FRawMidiPacket Packet;
+	Packet.Data.SetNumUninitialized(Message->size());
+	FMemory::Memcpy(Packet.Data.GetData(), Message->data(), Message->size());
+	Packet.DeltaTime = DeltaTime;
+	MidiComponent->IncomingMidiQueue.Enqueue(MoveTemp(Packet));
 }
 
 void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiComponent, std::vector<unsigned char> RawMessage, double DeltaTime)
@@ -30,7 +24,7 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 		return;
 
 	//External Midi Message Send To Wwise
-	if (MidiComponent->bIsOutputToWwise && !MidiComponent->bIsInputFromUnreal)
+	if (MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
 		size_t nBytes = RawMessage.size();
 		for (size_t i = 0; i < nBytes;)
@@ -70,7 +64,7 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 		}
 	}
 	//External Midi Message Send To Other Midi Receiver
-	else if (!MidiComponent->bIsOutputToWwise && !MidiComponent->bIsInputFromUnreal)
+	else if (!MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
 		if (MidiComponent)
 		{
@@ -116,21 +110,22 @@ void UAkMidiComponent::OnRegister()
 
 void UAkMidiComponent::HandleWwiseCallback(AkAudioSettings* in_AudioSettings)
 {
-	if (!bIsOutputToWwise)
+	if (!GetIsOutputToWwise())
 		return;
 
 	if (AudioSettings == nullptr)
 		AudioSettings = in_AudioSettings;
 
-	PostMidiEvent(); 
+	ProcessIncomingMidiQueue();
+	PostMidiEvent();
 
 	//UE_LOG(LogTemp, Warning, TEXT("HandleWwiseCallback"));
 
 }
 
 
-UAkMidiComponent::UAkMidiComponent(const class FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer), 
-bIsOutputToWwise(true), bIsInputFromUnreal(true), MessagePoolCount(0), PostPoolCount(0), bMidiFxOnOff(false)
+UAkMidiComponent::UAkMidiComponent(const class FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer),
+OutputTarget(EMidiOutputTarget::Wwise), InputSource(EMidiInputSource::Unreal), bMidiFxOnOff(false), MessagePoolCount(0), PostPoolCount(0)
 {
 	MidiDevice = NewObject<UAkMidiDevice>();
 	MidiDevice->AddToRoot();
@@ -150,9 +145,7 @@ bIsOutputToWwise(true), bIsInputFromUnreal(true), MessagePoolCount(0), PostPoolC
 
 UAkMidiComponent::~UAkMidiComponent()
 {
-	Posts.Empty();
-	PostPool.Empty();
-	MessagePool.Empty();
+	CloseMidiDevice(EIOType::IO_Both);
 
 	for (auto Message : MessagePool)
 	{
@@ -164,6 +157,7 @@ UAkMidiComponent::~UAkMidiComponent()
 		Message->ConditionalBeginDestroy();
 		Message = nullptr;
 	}
+	MessagePool.Empty();
 
 	for (auto Post : PostPool)
 	{
@@ -173,8 +167,9 @@ UAkMidiComponent::~UAkMidiComponent()
 			Post = nullptr;
 		}
 	}
+	PostPool.Empty();
 
-	CloseMidiDevice(EIOType::IO_Both);
+	Posts.Empty();
 }
 
 
@@ -198,14 +193,14 @@ bool UAkMidiComponent::PostMidiEvent()
 
 bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent)
 {
-	if (!bIsInputFromUnreal)
+	if ((InputSource != EMidiInputSource::Unreal))
 		return false;
 
 	if (AkMidiMessages.Num() <= 0)
 		return false;
 
 	//Ak Midi Message Send To Wwise
-	if (bIsOutputToWwise)
+	if (GetIsOutputToWwise())
 	{
 		for (auto MidiMessage : AkMidiMessages)
 		{
@@ -213,7 +208,7 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 			{
 				MakePost(MidiMessage);
 			}
-			else if (bMidiFxOnOff && bIsInputFromUnreal)
+			else if (bMidiFxOnOff && (InputSource == EMidiInputSource::Unreal))
 			{
 				//UAkMidiMessage* AkMessageFxProcessed = NewObject<UAkMidiMessage>(this, TEXT("AkMessageFxProcessed"), EObjectFlags::RF_NoFlags, MidiMessage);
 				MidiMessage->BackupMidiMessage();
@@ -221,7 +216,7 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 				MakePost(MidiMessage);
 				MidiMessage->RecoverMidiMessage();
 			}
-			else if (bMidiFxOnOff && !bIsInputFromUnreal)
+			else if (bMidiFxOnOff && (InputSource != EMidiInputSource::Unreal))
 			{
 				InsertMidiFx(MidiMessage);
 				MakePost(MidiMessage);
@@ -240,7 +235,7 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 			}
 
 			uint8 Status = ((uint8)MidiMessage->NoteType << 4) | MidiMessage->Channel;
-			uint8 RawMessage[3] = { Status,(uint8)MidiMessage->Data01, (uint8)MidiMessage->Data01 };
+			uint8 RawMessage[3] = { Status,(uint8)MidiMessage->Data01, (uint8)MidiMessage->Data02 };
 			
 			if (MidiMessage->NoteType != EAkMessageType::AMT_Program_Change && MidiMessage->NoteType != EAkMessageType::AMT_Channel_AfterTouch)
 			{
@@ -264,8 +259,11 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 	else
 		PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
 
-		Posts.Empty();
-
+	for (auto& Post : Posts) 
+	{
+		UE_LOG(LogTemp,Log,TEXT("[MIDI] byType = %d, noteNum = %d"), Post.midiEvent.byType, Post.midiEvent.NoteOnOff.byNote);
+	}
+	Posts.Empty();
 	if (PlayingID > 0)
 		return true;
 	else
@@ -393,11 +391,11 @@ void UAkMidiComponent::OpenMidiInputDevice(uint8 InputPort)
 	
 	if (InputPort == 127)
 	{
-		bIsInputFromUnreal = true;
+		InputSource = EMidiInputSource::Unreal;
 	}
 	else
 	{
-		bIsInputFromUnreal = false;
+		InputSource = EMidiInputSource::ExternalDevice;
 		MidiDevice->OpenInput(InputPort);
 
 	}
@@ -412,11 +410,11 @@ void UAkMidiComponent::OpenMidiOutputDevice(uint8 OutputPort)
 
 	if (OutputPort == 127)
 	{
-		bIsOutputToWwise = true;
+		OutputTarget = EMidiOutputTarget::Wwise;
 	}
 	else
 	{
-		bIsOutputToWwise = false;
+		OutputTarget = EMidiOutputTarget::ExternalDevice;
 		MidiDevice->OpenOutput(OutputPort);
 	}
 
@@ -430,35 +428,32 @@ void UAkMidiComponent::CloseMidiDevice(EIOType ClosePort)
 
 	if (ClosePort == EIOType::IO_Both)
 	{
-		if (!bIsInputFromUnreal && !bIsOutputToWwise)
+		if (InputSource == EMidiInputSource::ExternalDevice)
 		{
 			MidiDevice->CloseInput();
+		}
+		if (OutputTarget == EMidiOutputTarget::ExternalDevice)
+		{
 			MidiDevice->CloseOutput();
 		}
-		else if (bIsInputFromUnreal && !bIsOutputToWwise)
-		{
-			bIsInputFromUnreal = false;
-			MidiDevice->CloseOutput();
-		}
-		else if(!bIsInputFromUnreal && bIsOutputToWwise)
-		{
-			bIsOutputToWwise = false;
-			MidiDevice->CloseInput();
-		}
+		InputSource = EMidiInputSource::None;
+		OutputTarget = EMidiOutputTarget::None;
 	}
 	else if (ClosePort == EIOType::IO_Input)
 	{
-		if(bIsInputFromUnreal)
-			bIsInputFromUnreal = false;
-		else
+		if (InputSource == EMidiInputSource::ExternalDevice)
+		{
 			MidiDevice->CloseInput();
+		}
+		InputSource = EMidiInputSource::None;
 	}
 	else if (ClosePort == EIOType::IO_Output)
 	{
-		if(bIsOutputToWwise)
-			bIsOutputToWwise = false;
-		else
+		if (OutputTarget == EMidiOutputTarget::ExternalDevice)
+		{
 			MidiDevice->CloseOutput();
+		}
+		OutputTarget = EMidiOutputTarget::None;
 	}
 
 	return;
@@ -477,13 +472,26 @@ void UAkMidiComponent::SendRawMidiMessage(std::vector<unsigned char>& RawMessage
 
 
 
+void UAkMidiComponent::ProcessIncomingMidiQueue()
+{
+	FRawMidiPacket Packet;
+	while (IncomingMidiQueue.Dequeue(Packet))
+	{
+		std::vector<unsigned char> RawMessage(Packet.Data.GetData(), Packet.Data.GetData() + Packet.Data.Num());
+		if (MessagePoolCount >= MessagePoolMax - 2)
+			MessagePoolCount = 0;
+		UAkMidiMessage* AkMessage = MessagePool[MessagePoolCount++];
+		HandleRtMidiCallback(AkMessage, this, RawMessage, Packet.DeltaTime);
+	}
+}
+
 void MakePostsAsync::DoWork()
 {
 	if (!AkMessage)
 		return;
 
 	//External Midi Message Send To Wwise
-	if (MidiComponent->bIsOutputToWwise && !MidiComponent->bIsInputFromUnreal)
+	if (MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
 		size_t nBytes = RawMessage.size();
 		for (size_t i = 0; i < nBytes;)
@@ -523,7 +531,7 @@ void MakePostsAsync::DoWork()
 		}	
 	}
 	//External Midi Message Send To Other Midi Receiver
-	else if(!MidiComponent->bIsOutputToWwise && !MidiComponent->bIsInputFromUnreal)
+	else if(!MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
 		if (MidiComponent)
 		{
