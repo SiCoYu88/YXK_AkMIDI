@@ -174,6 +174,25 @@ namespace FAkAudioDevice_Helpers
 		}
 	}
 
+#pragma region H3D
+	void MidiCallback(AK::IAkGlobalPluginContext* Context, AkGlobalCallbackLocation Location)
+	{
+		SCOPED_AKAUDIO_EVENT_4(TEXT("FAkAudioDevice_Helpers::MidiCallback"));
+		(void)Context;
+		(void)Location;
+		FAkAudioDevice* Device = FAkAudioDevice::Get();
+		auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+		if (!Device || UNLIKELY(!SoundEngine))
+		{
+			return;
+		}
+
+		AkAudioSettings AudioSettings;
+		SoundEngine->GetAudioSettings(AudioSettings);
+		Device->OnMessageWaitToSend.ExecuteIfBound(&AudioSettings);
+	}
+#pragma endregion
+
 	void UnregisterGlobalCallbackDelegate(FAkAudioDeviceDelegates::FOnAkGlobalCallback* Delegate, FDelegateHandle Handle, AkGlobalCallbackLocation Location)
 	{
 		SCOPED_AKAUDIO_EVENT_4(TEXT("FAkAudioDevice_Helpers::UnregisterGlobalCallbackDelegate"));
@@ -539,6 +558,12 @@ bool FAkAudioDevice::Init()
 		UE_LOG(LogAkAudio, Log, TEXT("Audiokinetic Audio Device initialization failed."));
 		return false;
 	}
+
+#pragma region H3D
+	RegisterGlobalCallback(
+		FAkAudioDeviceDelegates::FOnAkGlobalCallback::FDelegate::CreateStatic(&FAkAudioDevice_Helpers::MidiCallback),
+		AkGlobalCallbackLocation_PreProcessMessageQueueForRender);
+#pragma endregion
 
 #if !WITH_EDITOR
 	if (auto* akSettings = GetDefault<UAkSettings>())
@@ -4591,6 +4616,38 @@ AKRESULT FAkAudioDevice::RegisterPluginDLL(const FString& in_DllName, const FStr
 	delete[] szPath;
 	return eResult;
 }
+
+#pragma region H3D
+AKRESULT FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine)) return AK_NotInitialized;
+
+	const AkUniqueID EventID = in_Event ? in_Event->GetShortID() : AK_INVALID_UNIQUE_ID;
+	if (EventID == AK_INVALID_UNIQUE_ID)
+	{
+		return AK_InvalidParameter;
+	}
+
+	return SoundEngine->PostMIDIOnEvent(EventID, in_gameObjectID, in_pPosts, in_uNumPosts);
+}
+
+AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::StopMidiEvent"));
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine)) return AK_NotInitialized;
+
+	const AkUniqueID EventID = in_Event ? in_Event->GetShortID() : AK_INVALID_UNIQUE_ID;
+	if (EventID == AK_INVALID_UNIQUE_ID)
+	{
+		return AK_InvalidParameter;
+	}
+
+	return SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID);
+}
+#pragma endregion
 // end
 
 FAkAudioDevice::SetCurrentAudioCultureAsyncTask::SetCurrentAudioCultureAsyncTask(FWwiseLanguageCookedData NewLanguage, FSetCurrentAudioCultureAction* LatentAction)

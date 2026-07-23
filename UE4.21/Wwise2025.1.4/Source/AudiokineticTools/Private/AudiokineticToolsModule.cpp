@@ -54,6 +54,9 @@ Copyright (c) 2025 Audiokinetic Inc.
 #include "Editor/UnrealEdEngine.h"
 #include "Factories/ActorFactoryAkAmbientSound.h"
 #include "Factories/AkAssetTypeActions.h"
+#pragma region H3D
+#include "AssetTypeActions_AkMidiMessage.h"
+#pragma endregion
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformFileManager.h"
 #include "Interfaces/IProjectManager.h"
@@ -551,6 +554,9 @@ void FAudiokineticToolsModule::StartupModule()
 			MakeShared<FAssetTypeActions_AkTrigger>(AudiokineticAssetCategoryBit),
 			MakeShared<FAssetTypeActions_AkSwitchValue>(AudiokineticAssetCategoryBit),
 			MakeShared<FAssetTypeActions_AkStateValue>(AudiokineticAssetCategoryBit),
+#pragma region H3D
+			MakeShared<FAssetTypeActions_AkMidiMessage>(AudiokineticAssetCategoryBit),
+#pragma endregion
 		};
 
 		for (auto& AkAssetTypeActions : AkAssetTypeActionsArray)

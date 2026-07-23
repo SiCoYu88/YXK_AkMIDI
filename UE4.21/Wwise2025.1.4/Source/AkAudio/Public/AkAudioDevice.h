@@ -84,6 +84,11 @@ typedef TSet<TWeakObjectPtr<UAkComponent>,TWeakObjectPtrSetKeyFuncs<TWeakObjectP
 struct AKAUDIO_API FAkAudioDeviceDelegates
 {
 	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAkGlobalCallback, AK::IAkGlobalPluginContext*, AkGlobalCallbackLocation);
+
+#pragma region H3D
+	// Callback delegate for AkMIDI module event posting.
+	DECLARE_DELEGATE_OneParam(FOnAkMIDIGlobalCallback, AkAudioSettings*);
+#pragma endregion
 };
 
 
@@ -917,6 +922,13 @@ public:
 	 */
 	FDelegateHandle RegisterGlobalCallback(FAkAudioDeviceDelegates::FOnAkGlobalCallback::FDelegate Callback, AkGlobalCallbackLocation Location);
 
+#pragma region H3D
+	/**
+	 * AkMIDI global callback instance, bound by AkMIDI module.
+	 */
+	FAkAudioDeviceDelegates::FOnAkMIDIGlobalCallback OnMessageWaitToSend;
+#pragma endregion
+
 	/**
 	 * Unregisters a callback that can run within the global callback at a specific AkGlobalCallbackLocation.
 	 *
@@ -1268,6 +1280,26 @@ public:
 	 * Allows to register a Wwise plugin from a DLL name and path
 	 */
 	AKRESULT RegisterPluginDLL(const FString& in_DllName, const FString& in_DllPath);
+
+#pragma region H3D
+	/**
+	 * Posts MIDI messages on a Wwise event for the specified game object.
+	 */
+	AKRESULT PostMidiEvent(
+		UAkAudioEvent* in_Event,
+		AkGameObjectID in_gameObjectID,
+		AkMIDIPost* in_pPosts,
+		AkUInt16 in_uNumPosts
+		);
+
+	/**
+	 * Stops MIDI playback on a Wwise event for the specified game object.
+	 */
+	AKRESULT StopMidiEvent(
+		UAkAudioEvent* in_Event,
+		AkGameObjectID in_gameObjectID
+		);
+#pragma endregion
 
 	/**
 	* Gets the path where the SoundBanks are located on disk

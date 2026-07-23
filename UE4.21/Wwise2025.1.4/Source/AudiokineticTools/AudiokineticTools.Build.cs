@@ -79,6 +79,9 @@ public class AudiokineticTools : ModuleRules
 				"XmlParser",
 
 				"AkAudio",
+#region H3D
+				"AkMIDI",
+#endregion
 				"WwiseAuthoring",
 				"WwiseEditorUtils",
 				"WwiseLowLevelUtils",
