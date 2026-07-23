@@ -4,34 +4,30 @@ using UnrealBuildTool;
 
 public class AudiokineticTools : ModuleRules
 {
-#if WITH_FORWARDED_MODULE_RULES_CTOR
     public AudiokineticTools(ReadOnlyTargetRules Target) : base(Target)
-#else
-    public AudiokineticTools(TargetInfo Target)
-#endif
     {
-		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-		PrivateIncludePaths.Add("AudiokineticTools/Private");
+        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        PrivateIncludePaths.Add("AudiokineticTools/Private");
+
         PrivateIncludePathModuleNames.AddRange(
             new string[]
             {
                 "TargetPlatform",
                 "MainFrame",
-				"MovieSceneTools",
+                "MovieSceneTools",
                 "LevelEditor"
             });
 
         PublicIncludePathModuleNames.AddRange(
-            new string[] 
-            { 
+            new string[]
+            {
                 "AssetTools",
-                "ContentBrowser",
-                "Matinee"
+                "ContentBrowser"
             });
 
         PublicDependencyModuleNames.AddRange(
-            new string[] 
-            { 
+            new string[]
+            {
                 "AkAudio",
                 "Core",
                 "InputCore",
@@ -40,27 +36,32 @@ public class AudiokineticTools : ModuleRules
                 "UnrealEd",
                 "Slate",
                 "SlateCore",
-                "Matinee",
-                "EditorStyle",
-				"Json",
-				"XmlParser",
-				"WorkspaceMenuStructure",
-				"DirectoryWatcher",
+                "Json",
+                "XmlParser",
+                "WorkspaceMenuStructure",
+                "DirectoryWatcher",
                 "Projects",
-				"Sequencer",
+                "Sequencer",
                 "PropertyEditor"
             });
 
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
-				"MovieScene",
-				"DesktopPlatform",
-				"MovieSceneTools",
-				"MovieSceneTracks",
-				"MatineeToLevelSequence",
+                "MovieScene",
+                "DesktopPlatform",
+                "MovieSceneTools",
+                "MovieSceneTracks",
                 "RenderCore",
                 "AkMIDI"
-			});
-	}
+            });
+
+        if (Target.Version.MajorVersion < 5)
+        {
+            PublicIncludePathModuleNames.Add("Matinee");
+            PublicDependencyModuleNames.Add("Matinee");
+            PrivateDependencyModuleNames.Add("MatineeToLevelSequence");
+            PublicDependencyModuleNames.Add("EditorStyle");
+        }
+    }
 }

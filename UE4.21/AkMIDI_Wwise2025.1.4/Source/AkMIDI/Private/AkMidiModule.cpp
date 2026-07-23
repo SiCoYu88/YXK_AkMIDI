@@ -2,7 +2,7 @@
 
 #include "AkMIDIModule.h"
 
-IMPLEMENT_MODULE(IAkMidiModule, AkMIDI)
+IMPLEMENT_MODULE(FAkMidiModule, AkMIDI)
 
 FAkMidiModule* FAkMidiModule::AkMidiModuleIntance = nullptr;
 

@@ -10,7 +10,7 @@
 
 
 USTRUCT(BlueprintType)
-struct FMidiDevice
+struct AKMIDI_API FMidiDevice
 {
 	GENERATED_BODY()
 

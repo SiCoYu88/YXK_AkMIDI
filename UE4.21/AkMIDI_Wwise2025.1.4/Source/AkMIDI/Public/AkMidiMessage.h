@@ -92,7 +92,7 @@ public:
 
 	// MIDI Note Type
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AkMIDI|AkMidiMessage")
-	TEnumAsByte<EAkMessageType> NoteType;
+	EAkMessageType NoteType;
 
 	//MIDI Note Channel 0-16
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AkMIDI|AkMidiMessage")
@@ -148,5 +148,6 @@ protected:
 private:
 	bool bIsDirty;
 
+	UPROPERTY(Transient)
 	UAkMidiMessage* MidiMessageBackup;
 };

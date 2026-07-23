@@ -3,10 +3,11 @@
 
 
 
-UAkMidiDevice::UAkMidiDevice(const class FObjectInitializer &ObjectInitializer):
-	Super(ObjectInitializer)
+UAkMidiDevice::UAkMidiDevice(const class FObjectInitializer &ObjectInitializer)
+	: Super(ObjectInitializer)
+	, MidiIn(nullptr)
+	, MidiOut(nullptr)
 {
-
 }
 
 UAkMidiDevice::~UAkMidiDevice()
@@ -27,8 +28,15 @@ UAkMidiDevice::~UAkMidiDevice()
 
 void UAkMidiDevice::GetMidiDevice(TArray<FMidiDevice> &InputDevice, TArray<FMidiDevice> &OutputDevices)
 {
-	MidiIn = new RtMidiIn();
-	MidiOut = new RtMidiOut();
+	if (MidiIn == nullptr)
+	{
+		MidiIn = new RtMidiIn();
+	}
+
+	if (MidiOut == nullptr)
+	{
+		MidiOut = new RtMidiOut();
+	}
 
 	uint8 size = MidiIn->getPortCount();
 	for (int i = 0; i < size; i++) 

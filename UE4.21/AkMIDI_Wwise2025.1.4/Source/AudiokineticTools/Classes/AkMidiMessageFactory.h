@@ -12,10 +12,10 @@
 UCLASS(hidecategories=Object)
 class AUDIOKINETICTOOLS_API UAkMidiMessageFactory : public UFactory
 {
-	GENERATED_UCLASS_BODY()
+	GENERATED_BODY()
 
-#if CPP
-		virtual UObject* FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Cpntext, FFeedbackContext* Warn) override;
-#endif
-	
+public:
+	UAkMidiMessageFactory(const FObjectInitializer& ObjectInitializer);
+
+	virtual UObject* FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn) override;
 };

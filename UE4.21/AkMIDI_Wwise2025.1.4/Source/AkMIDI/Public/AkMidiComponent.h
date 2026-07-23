@@ -9,6 +9,9 @@
 #include "AkMidiDevice.h"
 #include "AkAudioDevice.h"
 #include "Async/AsyncWork.h"
+
+#include <vector>
+
 #include "AkMidiComponent.generated.h"
 
 
@@ -58,14 +61,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
 	void MidiFxBypass(bool bIsMidiFxBypass);
 
-#if CPP
 	//----------------------------------------------------
 	virtual bool PostMidiEvent();
 	bool GetIsOutputToWwise() const { return bIsOutputToWwise; }
 	bool GetIsInputFromUnreal() const { return bIsInputFromUnreal; }
 	virtual void OnRegister() override;
-
-#endif // CPP
 
 
 

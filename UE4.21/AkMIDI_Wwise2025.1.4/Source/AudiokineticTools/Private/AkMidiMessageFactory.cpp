@@ -13,7 +13,7 @@ UAkMidiMessageFactory::UAkMidiMessageFactory(const FObjectInitializer& ObjectIni
 	bEditAfterNew = true;
 }
 
-UObject* UAkMidiMessageFactory::FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Cpntext, FFeedbackContext* Warn)
+UObject* UAkMidiMessageFactory::FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn)
 {
 	UAkMidiMessage* AkMidiMessage = NewObject<UAkMidiMessage>(InParent, Name, Flags);
 	return AkMidiMessage;

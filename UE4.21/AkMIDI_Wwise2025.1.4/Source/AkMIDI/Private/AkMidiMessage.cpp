@@ -30,9 +30,9 @@ void UAkMidiMessage::PostEditChangeProperty(FPropertyChangedEvent &PropertyChang
 }
 #endif
 
-void UAkMidiMessage::SetDirtyState(bool bIsDirty)
+void UAkMidiMessage::SetDirtyState(bool bInIsDirty)
 {
-	bIsDirty = bIsDirty;
+	bIsDirty = bInIsDirty;
 }
 
 bool UAkMidiMessage::GetDirtyState()

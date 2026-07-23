@@ -2,13 +2,8 @@
 
 #include "AkMidiFunctionLibrary.h"
 
-UAkMidiFunctionLibrary::UAkMidiFunctionLibrary(FObjectInitializer const& ObjectInitializer) : Super(ObjectInitializer)
-{
-}
-
-
 UAkMidiMessage* UAkMidiFunctionLibrary::CreateAkMidiMessage(
-	TEnumAsByte<EAkMessageType> NoteType,
+	EAkMessageType NoteType,
 	uint8 Channel,
 	uint8 NoteOffset,
 	uint8 Data01,
@@ -81,7 +76,7 @@ bool UAkMidiFunctionLibrary::CloseMidiDevice(UAkMidiComponent* MidiComponent, EI
 	return true;
 }
 
-void UAkMidiFunctionLibrary::ModifyAkMidiMessage(UAkMidiMessage* MidiMessage, TEnumAsByte<EMessageParamType> NoteValueType, uint8 value)
+void UAkMidiFunctionLibrary::ModifyAkMidiMessage(UAkMidiMessage* MidiMessage, EMessageParamType NoteValueType, uint8 value)
 {
 	if (MidiMessage == nullptr)
 		return;

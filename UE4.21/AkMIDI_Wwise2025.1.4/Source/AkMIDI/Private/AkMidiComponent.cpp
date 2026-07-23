@@ -238,7 +238,7 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 				InsertMidiFx(MidiMessage);
 			}
 
-			uint8 Status = ((uint8)MidiMessage->NoteType.GetValue() << 4) | MidiMessage->Channel;
+			uint8 Status = ((uint8)MidiMessage->NoteType << 4) | MidiMessage->Channel;
 			uint8 RawMessage[3] = { Status,(uint8)MidiMessage->Data01, (uint8)MidiMessage->Data01 };
 			
 			if (MidiMessage->NoteType != EAkMessageType::AMT_Program_Change && MidiMessage->NoteType != EAkMessageType::AMT_Channel_AfterTouch)

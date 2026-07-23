@@ -13,13 +13,13 @@
 UCLASS(Blueprintable)
 class AKMIDI_API UAkMidiFunctionLibrary : public UBlueprintFunctionLibrary
 {
-	GENERATED_UCLASS_BODY()
+	GENERATED_BODY()
 
 public:
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|Function")
 	static UAkMidiMessage* CreateAkMidiMessage(
-		TEnumAsByte<EAkMessageType> NoteType,
+		EAkMessageType NoteType,
 		uint8 Channel,
 		uint8 NoteOffset,
 		uint8 Data01,
@@ -46,7 +46,7 @@ public:
 	static bool CloseMidiDevice(UAkMidiComponent* MidiComponent, EIOType ClosePort);
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|Function")
-	static void ModifyAkMidiMessage(UAkMidiMessage* MidiMessage, TEnumAsByte<EMessageParamType> NoteValueType, uint8 Value);
+	static void ModifyAkMidiMessage(UAkMidiMessage* MidiMessage, EMessageParamType NoteValueType, uint8 Value);
 
 
 

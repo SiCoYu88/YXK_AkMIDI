@@ -5,6 +5,7 @@
 =============================================================================*/
 #include "AudiokineticToolsPrivatePCH.h"
 #include "Modules/ModuleManager.h"
+#include "Runtime/Launch/Resources/Version.h"
 
 // @todo sequencer uobjects: The *.generated.inl should auto-include required headers (they should always have #pragma once anyway)
 #include "AkAudioDevice.h"
@@ -12,17 +13,19 @@
 #include "AkSettingsPerUser.h"
 #include "AkSurfaceReflectorSetComponent.h"
 #include "AkAcousticPortal.h"
+#if ENGINE_MAJOR_VERSION < 5
 #include "InterpTrackAkAudioRTPC.h"
 #include "InterpTrackAkAudioEvent.h"
+#include "MatineeModule.h"
+#include "InterpTrackAkAudioEventHelper.h"
+#include "InterpTrackAkAudioRTPCHelper.h"
+#endif
 #include "AkLateReverbComponent.h"
 #include "AkRoomComponent.h"
 #include "AkAudioBankFactory.h"
 #include "AkAudioEventFactory.h"
 #include "ActorFactoryAkAmbientSound.h"
 #include "AkComponentVisualizer.h"
-#include "MatineeModule.h"
-#include "InterpTrackAkAudioEventHelper.h"
-#include "InterpTrackAkAudioRTPCHelper.h"
 #include "AssetToolsModule.h"
 #include "ContentBrowserModule.h"
 #include "AssetTypeActions_AkAudioBank.h"
@@ -30,7 +33,7 @@
 #include "AssetTypeActions_AkAuxBus.h"
 #include "AssetTypeActions_AkAcousticTexture.h"
 #include "AssetTypeActions_AkMidiMessage.h"
-#include "Editor/LevelEditor/Public/LevelEditor.h"
+#include "LevelEditor.h"
 #include "ISettingsModule.h"
 #include "ISettingsSection.h"
 #include "AkSettings.h"
@@ -64,8 +67,10 @@
 #include "MovieSceneAkAudioRTPCTrackEditor.h"
 #include "MovieSceneAkAudioEventTrackEditor.h"
 
+#if ENGINE_MAJOR_VERSION < 5
 #include "AkMatineeImportTools.h"
 #include "MatineeToLevelSequenceModule.h"
+#endif
 #include "WwiseEventDragDropOp.h"
 
 #include "AkSurfaceReflectorSetDetailsCustomization.h"
@@ -164,11 +169,11 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 			else
 			{
 				// First-time plugin migration: Project might be relative to Engine path. Fix-up the path to make it relative to the game.
-#if UE_4_18_OR_LATER
+#if ENGINE_MAJOR_VERSION >= 5 || UE_4_18_OR_LATER
 				const auto ProjectDir = FPaths::ProjectDir();
 #else
 				const auto ProjectDir = FPaths::GameDir();
-#endif // UE_4_18_OR_LATER
+#endif
 
 				FString FullGameDir = FPaths::ConvertRelativePathToFull(ProjectDir);
 				FString TempPath = FPaths::ConvertRelativePathToFull(FullGameDir, AkSettings->WwiseProjectPath.FilePath);
@@ -267,7 +272,7 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 			}
 		}
 
-		if (GUnrealEd != NULL)
+		if (GUnrealEd != nullptr)
 		{
 			GUnrealEd->RegisterComponentVisualizer(UAkComponent::StaticClass()->GetFName(), MakeShareable(new FAkComponentVisualizer));
 			GUnrealEd->RegisterComponentVisualizer(UAkSurfaceReflectorSetComponent::StaticClass()->GetFName(), MakeShareable(new FAkSurfaceReflectorSetComponentVisualizer));
@@ -279,9 +284,10 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 
 	void LateRegistrationOfMatineeToLevelSequencer()
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		IMatineeToLevelSequenceModule& Module = FModuleManager::LoadModuleChecked<IMatineeToLevelSequenceModule>(TEXT("MatineeToLevelSequence"));
 
-		ConvertMatineeRTPCTrackHandle = Module.RegisterTrackConverterForMatineeClass(UInterpTrackAkAudioRTPC::StaticClass(), 
+		ConvertMatineeRTPCTrackHandle = Module.RegisterTrackConverterForMatineeClass(UInterpTrackAkAudioRTPC::StaticClass(),
 			IMatineeToLevelSequenceModule::FOnConvertMatineeTrack::CreateLambda([](UInterpTrack* Track, FGuid PossessableGuid, UMovieScene* NewMovieScene)
 		{
 			if (Track->GetNumKeyframes() != 0 && PossessableGuid.IsValid())
@@ -292,7 +298,7 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 			}
 		}));
 
-		ConvertMatineeEventTrackHandle = Module.RegisterTrackConverterForMatineeClass(UInterpTrackAkAudioEvent::StaticClass(), 
+		ConvertMatineeEventTrackHandle = Module.RegisterTrackConverterForMatineeClass(UInterpTrackAkAudioEvent::StaticClass(),
 			IMatineeToLevelSequenceModule::FOnConvertMatineeTrack::CreateLambda([](UInterpTrack* Track, FGuid PossessableGuid, UMovieScene* NewMovieScene)
 		{
 			if (Track->GetNumKeyframes() != 0 && PossessableGuid.IsValid())
@@ -302,15 +308,16 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 				FAkMatineeImportTools::CopyInterpAkAudioEventTrack(MatineeAkAudioEventTrack, AkAudioEventTrack);
 			}
 		}));
+#endif
 
 		ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>(TEXT("Sequencer"));
-#if UE_4_16_OR_LATER
+#if ENGINE_MAJOR_VERSION >= 5 || UE_4_16_OR_LATER
 		RTPCTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FMovieSceneAkAudioRTPCTrackEditor::CreateTrackEditor));
 		EventTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FMovieSceneAkAudioEventTrackEditor::CreateTrackEditor));
 #else
 		RTPCTrackEditorHandle = SequencerModule.RegisterTrackEditor_Handle(FOnCreateTrackEditor::CreateStatic(&FMovieSceneAkAudioRTPCTrackEditor::CreateTrackEditor));
 		EventTrackEditorHandle = SequencerModule.RegisterTrackEditor_Handle(FOnCreateTrackEditor::CreateStatic(&FMovieSceneAkAudioEventTrackEditor::CreateTrackEditor));
-#endif // UE_4_16_OR_LATER
+#endif
 
 		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 		AssetRegistryModule.Get().OnFilesLoaded().Remove(LateRegistrationOfMatineeToLevelSequencerHandle);
@@ -347,7 +354,7 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 
 			// Add Wwise to the help menu
 			MainMenuExtender = MakeShareable(new FExtender);
-			MainMenuExtender->AddMenuExtension("HelpBrowse", EExtensionHook::After, NULL, FMenuExtensionDelegate::CreateRaw(this, &FAudiokineticToolsModule::AddWwiseHelp));
+			MainMenuExtender->AddMenuExtension("HelpBrowse", EExtensionHook::After, nullptr, FMenuExtensionDelegate::CreateRaw(this, &FAudiokineticToolsModule::AddWwiseHelp));
 			LevelEditorModule.GetMenuExtensibilityManager()->AddExtender(MainMenuExtender);
 		}
 
@@ -423,7 +430,7 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 
 		UnregisterSettings();
 
-		if(GUnrealEd != NULL)
+		if (GUnrealEd != nullptr)
 		{
 			GUnrealEd->UnregisterComponentVisualizer(UAkComponent::StaticClass()->GetFName());
 		}
@@ -431,6 +438,7 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 		FGlobalTabmanager::Get()->UnregisterTabSpawner("Waapi Picker");
 		FGlobalTabmanager::Get()->UnregisterTabSpawner("Wwise Picker");
 
+#if ENGINE_MAJOR_VERSION < 5
 		auto MatineeToLevelSequenceModule = FModuleManager::GetModulePtr<IMatineeToLevelSequenceModule>(TEXT("MatineeToLevelSequence"));
 		if (0 && MatineeToLevelSequenceModule)
 		{
@@ -438,23 +446,24 @@ class FAudiokineticToolsModule : public IAudiokineticTools
 			MatineeToLevelSequenceModule->UnregisterTrackConverterForMatineeClass(ConvertMatineeRTPCTrackHandle);
 			MatineeToLevelSequenceModule->UnregisterTrackConverterForMatineeClass(ConvertMatineeEventTrackHandle);
 		}
+#endif
 
 		if (FModuleManager::Get().IsModuleLoaded(TEXT("Sequencer")))
 		{
 			ISequencerModule& SequencerModule = FModuleManager::GetModuleChecked<ISequencerModule>(TEXT("Sequencer"));
-#if UE_4_16_OR_LATER
+#if ENGINE_MAJOR_VERSION >= 5 || UE_4_16_OR_LATER
 			SequencerModule.UnRegisterTrackEditor(RTPCTrackEditorHandle);
 			SequencerModule.UnRegisterTrackEditor(EventTrackEditorHandle);
 #else
 			SequencerModule.UnRegisterTrackEditor_Handle(RTPCTrackEditorHandle);
 			SequencerModule.UnRegisterTrackEditor_Handle(EventTrackEditorHandle);
-#endif // UE_4_16_OR_LATER
+#endif
 		}
 
 		FEditorDelegates::EndPIE.RemoveAll(this);
 
 		// Only found way to close the tab in the case of a hot-reload. We need a pointer to the DockTab, and the only way of getting it seems to be InvokeTab.
-		if (GUnrealEd && !GUnrealEd->IsPendingKill())
+		if (IsValid(GUnrealEd))
 		{
 			FGlobalTabmanager::Get()->InvokeTab(SWaapiPicker::WaapiPickerTabName)->RequestCloseTab();
 			FGlobalTabmanager::Get()->InvokeTab(SWwisePicker::WwisePickerTabName)->RequestCloseTab();
@@ -550,7 +559,11 @@ private:
 			for (const auto& AvailablePlatform : AkUnrealPlatformHelper::GetAllSupportedUnrealPlatforms())
 			{
 				FString SettingsClassName = FString::Format(TEXT("Ak{0}InitializationSettings"), { *AvailablePlatform });
+#if ENGINE_MAJOR_VERSION >= 5
+				UClass* SettingsClass = FindFirstObject<UClass>(*SettingsClassName);
+#else
 				UClass* SettingsClass = FindObject<UClass>(ANY_PACKAGE, *SettingsClassName);
+#endif
 				if (SettingsClass)
 				{
 					FString CategoryNameKey = FString::Format(TEXT("Wwise{0}SettingsName"), { *AvailablePlatform });
