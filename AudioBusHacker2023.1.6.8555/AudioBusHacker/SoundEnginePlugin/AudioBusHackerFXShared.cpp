@@ -26,7 +26,6 @@ the specific language governing permissions and limitations under the License.
 
 #include <AK/SoundEngine/Common/IAkPlugin.h>
 #include "AudioBusHackerFXFactory.h"
-#include <AK/Plugin/AkAudioBusHackerPlugin.h>
 
 #include <AK/Tools/Common/AkAssert.h>
 

@@ -28,7 +28,7 @@ the specific language governing permissions and limitations under the License.
 #define AudioBusHackerFX_H
 
 #include "AudioBusHackerFXParams.h"
-#include "AK/Plugin/AkAudioBusHackerPlugin.h"
+#include "AkAudioBusHackerPlugin.h"
 
 //AK_CALLBACK(void, AkAudioBusHackerPluginExecuteCallbackFunc)(
 //    AkAudioBuffer* io_pBufferOut

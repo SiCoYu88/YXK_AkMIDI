@@ -28,6 +28,18 @@ the specific language governing permissions and limitations under the License.
 #define AudioBusHackerFXFactory_H
 
 AK_STATIC_LINK_PLUGIN(AudioBusHackerFX);
-#include "AK/Plugin/AkAudioBusHackerPlugin.h"
+
+#ifndef AudioBusHackerCallbackAPI_H
+#define AudioBusHackerCallbackAPI_H
+
+AK_CALLBACK(void, AkAudioBusHackerPluginExecuteCallbackFunc)(
+    AkAudioBuffer* io_pBufferOut
+    );
+
+extern "C" AK_DLLEXPORT int SetAudioBusHackerCallbacks(
+    AkAudioBusHackerPluginExecuteCallbackFunc in_ABHExecCallback
+    );
+
+#endif // AudioBusHackerCallbackAPI_H
 
 #endif // AudioBusHackerFXFactory_H

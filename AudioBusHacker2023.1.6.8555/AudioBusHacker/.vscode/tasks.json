@@ -7,7 +7,7 @@
 			"label": "wp.py premake",
 			"type": "shell",
 			"windows": {
-				"command": "py"
+				"command": "py -3"
 			},
 			"osx": {
 				"command": "python3"
@@ -25,7 +25,7 @@
 			"label": "wp.py build",
 			"type": "shell",
 			"windows": {
-				"command": "py",
+				"command": "py -3",
 				"args": [
 					"${env:WWISEROOT}/Scripts/Build/Plugins/wp.py",
 					"build",
@@ -73,7 +73,7 @@
 			"label": "wp.py build Documentation",
 			"type": "shell",
 			"windows": {
-				"command": "py"
+				"command": "py -3"
 			},
 			"osx": {
 				"command": "python3"
@@ -92,7 +92,7 @@
 			"label": "wp.py package",
 			"type": "shell",
 			"windows": {
-				"command": "py"
+				"command": "py -3"
 			},
 			"osx": {
 				"command": "python3"
@@ -112,7 +112,7 @@
 			"label": "wp.py generate-bundle",
 			"type": "shell",
 			"windows": {
-				"command": "py"
+				"command": "py -3"
 			},
 			"osx": {
 				"command": "python3"
@@ -134,20 +134,11 @@
 			"type": "pickString",
 			"description": "Platform to target",
 			"options": [
-				"Authoring",
+				"Authoring_Windows",
 				"Windows_vc170",
-				"Windows_vc160",
 				"Android",
-				"macOS",
+				"Mac",
 				"iOS",
-				"tvOS",
-				"visionOS",
-				"Linux",
-				"PS5",
-				"PS4",
-				"XboxOne",
-				"XboxSeriesX",
-				"NX",
 				"Documentation",
 				"Common"
 			]
@@ -201,8 +192,7 @@
 			"type": "pickString",
 			"description": "Select toolset",
 			"options": [
-				"vc170",
-				"vc160"
+				"vc170"
 			]
 		},
 		{

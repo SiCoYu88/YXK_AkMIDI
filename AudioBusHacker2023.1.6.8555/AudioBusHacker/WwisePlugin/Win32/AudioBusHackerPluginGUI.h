@@ -29,8 +29,7 @@ the specific language governing permissions and limitations under the License.
 #include "../AudioBusHackerPlugin.h"
 
 class AudioBusHackerPluginGUI final
-	: public AK::Wwise::Plugin::PluginMFCWindows<>
-	, public AK::Wwise::Plugin::GUIWindows
+	: public AK::Wwise::Plugin::GUIWindows
 {
 public:
 	AudioBusHackerPluginGUI();
