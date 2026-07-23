@@ -27,11 +27,29 @@ the specific language governing permissions and limitations under the License.
 #pragma once
 
 #include "../AudioBusHackerPlugin.h"
+#define AUDIO_BUS_HACKER_NO_STATIC_LINK
+#include "../../SoundEnginePlugin/AudioBusHackerFXFactory.h"
+#undef AUDIO_BUS_HACKER_NO_STATIC_LINK
 
 class AudioBusHackerPluginGUI final
 	: public AK::Wwise::Plugin::GUIWindows
+	, public AK::Wwise::Plugin::Notifications::Monitor
 {
 public:
 	AudioBusHackerPluginGUI();
 
+	void NotifyMonitorData(
+		AkTimeMs in_iTimeStamp,
+		const AK::Wwise::Plugin::MonitorData* in_pMonitorDataArray,
+		unsigned int in_uMonitorDataArraySize,
+		bool in_bIsRealtime) override;
+
+	bool HasVisualizationData() const { return m_bHasVisualizationData; }
+	const AkAudioBusHackerVisualizationData& GetVisualizationData() const { return m_visualizationData; }
+	bool IsVisualizationRealtime() const { return m_bIsVisualizationRealtime; }
+
+private:
+	AkAudioBusHackerVisualizationData m_visualizationData;
+	bool m_bHasVisualizationData;
+	bool m_bIsVisualizationRealtime;
 };

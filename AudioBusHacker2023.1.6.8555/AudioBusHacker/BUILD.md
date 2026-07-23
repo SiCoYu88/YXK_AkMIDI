@@ -13,6 +13,8 @@
 
 工程最初来自 Wwise 2023.1.6.8555。`vc170` 解决方案现已用 2025.1.4 Premake 重新生成；旧 2023 安装包保存在 `LegacyPackages`，不能安装到 Wwise 2025.1。
 
+Bus 电平、波形、频谱和立体声相关度的数据协议及接入方式见 [VISUALIZATION.md](VISUALIZATION.md)。
+
 ## 批处理快捷方式
 
 完整生成、编译、文档、打包和验证流程：

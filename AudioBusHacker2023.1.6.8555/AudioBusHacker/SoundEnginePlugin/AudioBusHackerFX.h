@@ -27,6 +27,8 @@ the specific language governing permissions and limitations under the License.
 #ifndef AudioBusHackerFX_H
 #define AudioBusHackerFX_H
 
+#include <atomic>
+
 #include "AudioBusHackerFXParams.h"
 #include "AkAudioBusHackerPlugin.h"
 
@@ -71,19 +73,43 @@ public:
     /// Return AK_DataReady or AK_NoMoreData, depending if there would be audio output or not at that point.
     AKRESULT TimeSkip(AkUInt32 in_uFrames) override;
 
-    //static void SetAudioBusHackerCallbacksFX(AkAudioBusHackerPluginExecuteCallbackFunc in_ABHExecCallback);
-    static AkAudioBusHackerPluginExecuteCallbackFunc m_ABHExecCallback;
+    static std::atomic<AkAudioBusHackerPluginExecuteCallbackFunc> m_ABHExecCallback;
+    static std::atomic<AkAudioBusHackerVisualizationCallbackFunc> m_visualizationCallback;
 
 private:
+    static const AkUInt32 kSpectrumWindowFrames = 1024;
+    static const AkUInt32 kVisualizationRateHz = 25;
 
-    //static void HackerCallback(
-    //    AkAudioBuffer* io_pBufferOut  // Buffer to fill
-    //);
+    void AnalyzeBuffer(AkAudioBuffer* in_pBuffer);
+    void PublishVisualization(AkUInt32 in_uNumChannels, AkUInt32 in_uAnalyzedChannels);
+    void ResetIntervalAnalysis();
+    void InitializeSpectrum();
+    static AkReal32 LinearToDb(AkReal32 in_fLinear);
+
     AudioBusHackerFXParams* m_pParams;
     AK::IAkPluginMemAlloc* m_pAllocator;
     AK::IAkEffectPluginContext* m_pContext;
-    //static AkAudioBusHackerPluginExecuteCallbackFunc m_ABHExecCallback;
-    //static AkAudioBuffer* m_pbuffer;
+    AkUInt32 m_uSampleRate;
+    AkUInt32 m_uChannelConfig;
+    AkUInt32 m_uReportIntervalFrames;
+    AkUInt32 m_uFramesSinceReport;
+    AkUInt32 m_uSequence;
+    AkUInt32 m_uSpectrumWritePosition;
+    AkUInt32 m_uSpectrumSamples;
+    bool m_bAnalysisActive;
+    AkReal32 m_fChannelPeak[AK_AUDIO_BUS_HACKER_MAX_CHANNELS];
+    double m_fChannelSumSquares[AK_AUDIO_BUS_HACKER_MAX_CHANNELS];
+    AkReal32 m_fWaveformMin[AK_AUDIO_BUS_HACKER_WAVEFORM_BINS];
+    AkReal32 m_fWaveformMax[AK_AUDIO_BUS_HACKER_WAVEFORM_BINS];
+    AkReal32 m_fSpectrumHistory[kSpectrumWindowFrames];
+    AkReal32 m_fSpectrumWindow[kSpectrumWindowFrames];
+    AkReal32 m_fSpectrumCoefficient[AK_AUDIO_BUS_HACKER_SPECTRUM_BINS];
+    AkReal32 m_fSpectrumMinHz;
+    AkReal32 m_fSpectrumMaxHz;
+    AkReal32 m_fSpectrumWindowSum;
+    double m_fStereoCross;
+    double m_fStereoLeftSquares;
+    double m_fStereoRightSquares;
 };
 
 #endif // AudioBusHackerFX_H

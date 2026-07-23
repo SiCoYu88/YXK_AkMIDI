@@ -1,14 +1,5 @@
 #pragma once
 
-#ifndef AudioBusHackerCallbackAPI_H
-#define AudioBusHackerCallbackAPI_H
-
-AK_CALLBACK(void, AkAudioBusHackerPluginExecuteCallbackFunc)(
-    AkAudioBuffer* io_pBufferOut
-    );
-
-extern "C" AK_DLLEXPORT int SetAudioBusHackerCallbacks(
-    AkAudioBusHackerPluginExecuteCallbackFunc in_ABHExecCallback
-    );
-
-#endif // AudioBusHackerCallbackAPI_H
+#define AUDIO_BUS_HACKER_NO_STATIC_LINK
+#include "AudioBusHackerFXFactory.h"
+#undef AUDIO_BUS_HACKER_NO_STATIC_LINK

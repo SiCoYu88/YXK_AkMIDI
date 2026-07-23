@@ -25,9 +25,46 @@ the specific language governing permissions and limitations under the License.
 *******************************************************************************/
 
 #include "AudioBusHackerPluginGUI.h"
+#include <cstring>
 
 AudioBusHackerPluginGUI::AudioBusHackerPluginGUI()
+	: m_visualizationData{}
+	, m_bHasVisualizationData(false)
+	, m_bIsVisualizationRealtime(false)
 {
+}
+
+void AudioBusHackerPluginGUI::NotifyMonitorData(
+	AkTimeMs,
+	const AK::Wwise::Plugin::MonitorData* in_pMonitorDataArray,
+	unsigned int in_uMonitorDataArraySize,
+	bool in_bIsRealtime)
+{
+	for (unsigned int index = 0; index < in_uMonitorDataArraySize; ++index)
+	{
+		const auto& monitorData = in_pMonitorDataArray[index];
+		if (!monitorData.pData || monitorData.uDataSize < sizeof(AkUInt32) * 2)
+			continue;
+
+		const auto* visualizationData =
+			static_cast<const AkAudioBusHackerVisualizationData*>(monitorData.pData);
+		if (visualizationData->uVersion != AK_AUDIO_BUS_HACKER_VISUALIZATION_VERSION
+			|| visualizationData->uStructSize < sizeof(AkUInt32) * 2)
+		{
+			continue;
+		}
+
+		unsigned int copySize = visualizationData->uStructSize;
+		if (copySize > monitorData.uDataSize)
+			copySize = monitorData.uDataSize;
+		if (copySize > sizeof(m_visualizationData))
+			copySize = sizeof(m_visualizationData);
+
+		std::memset(&m_visualizationData, 0, sizeof(m_visualizationData));
+		std::memcpy(&m_visualizationData, visualizationData, copySize);
+		m_bHasVisualizationData = true;
+		m_bIsVisualizationRealtime = in_bIsRealtime;
+	}
 }
 
 ADD_AUDIOPLUGIN_CLASS_TO_CONTAINER(
