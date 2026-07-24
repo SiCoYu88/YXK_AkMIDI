@@ -5,14 +5,15 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 #include "AkAudioDevice.h"
+#define AUDIO_BUS_HACKER_NO_STATIC_LINK
 #include "Ak/Plugin/AudioBusHackerFXFactory.h"
+#undef AUDIO_BUS_HACKER_NO_STATIC_LINK
 
-typedef int(*SABH)(AkAudioBusHackerPluginExecuteCallbackFunc ABHfnc);
+using FSetAudioBusHackerVisualizationCallback = int(*)(AkAudioBusHackerVisualizationCallbackFunc);
 
 class IAkAudioSamplerModule : public IModuleInterface
 {
 public:
-
 	static inline IAkAudioSamplerModule& Get()
 	{
 		return FModuleManager::LoadModuleChecked<IAkAudioSamplerModule>("AkAudioSampler");
@@ -27,10 +28,13 @@ public:
 class FAkAudioSamplerModule : public IAkAudioSamplerModule
 {
 public:
-	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
-	static SABH SetCallBackFunc;
-	static FAkAudioSamplerModule* AkAudioSamplerModuleIntance;
-};
 
+	static int32 SetVisualizationCallback(AkAudioBusHackerVisualizationCallbackFunc InCallback);
+	static bool IsVisualizationCallbackAvailable();
+
+private:
+	static FSetAudioBusHackerVisualizationCallback SetVisualizationCallbackFunc;
+	static void* AudioBusHackerDllHandle;
+};

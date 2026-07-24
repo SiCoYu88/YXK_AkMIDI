@@ -1,185 +1,286 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "AkAudioSampler.h"
-#include "AkAudioDevice.h"
+
+#include <atomic>
+
+#include "AkAudioSamplerModule.h"
+#include "HAL/CriticalSection.h"
+#include "Misc/ScopeLock.h"
 #include "Wwise/API/WwiseSoundEngineAPI.h"
-#define DJ_FFT_IMPLEMENTATION 
-#include "dj_fft.h"
-//#include "Ak/Plugin/AudioBusHackerFXFactory.h"
-#include "Ak/Plugin/AudioBusHackerFXFactory.h"
-#include "Interfaces/IPluginManager.h"
 
-//AK_DLLIMPORT void SetAudioBusHackerCallbacks(AkAudioBusHackerPluginExecuteCallbackFunc m_ABHExecCallback);
-
-UAkAudioSampler::UAkAudioSampler(const class FObjectInitializer& ObjectInitializer)
-    : Super(ObjectInitializer)
+namespace
 {
-    // Property initialization
-}
+constexpr uint64 VisualizationQueueCapacity = 128;
 
-static UAkAudioSampler::Samplerdata* pdata = new UAkAudioSampler::Samplerdata();
-
-void UAkAudioSampler::SaveBufferAndChannels(AkAudioBuffer* buffer, unsigned Numchannels, unsigned ucount) {
-    int N = buffer->uValidFrames;
-    if (N > 0) {
-        pdata->bufferlist.Empty();
-        pdata->count = 0;
-        AkUInt16 uFramesProcessed = 0;
-        //Ĭ���õ�Buffer��ǰ����ͨ��
-        AkReal32* AK_RESTRICT pBuf1 = buffer->GetChannel(0);
-        AkReal32* AK_RESTRICT pBuf2 = buffer->GetChannel(1);
-        // input size
-        auto myData1 = std::vector<std::complex<float>>(N);
-        auto myData2 = std::vector<std::complex<float>>(N);
-        for (int i = 0; i < N / 2; ++i) {
-            myData1[i] = (float)pBuf1[2 * i];
-        }
-        for (int i = 0; i < N / 2; ++i) {
-            myData1[i + N / 2] = (float)pBuf2[2 * i];
-        }
-        auto fftData1 = dj::fft1d(myData1, dj::fft_dir::DIR_FWD);
-
-        for (int i = 0; i < N / 2; ++i) {
-            myData2[i] = (float)pBuf1[2 * i + 1];
-        }
-        for (int i = 0; i < N / 2; ++i) {
-            myData2[i + N / 2] = (float)pBuf2[2 * i + 1];
-        }
-        auto fftData2 = dj::fft1d(myData2, dj::fft_dir::DIR_FWD);
-        //��ͨ����ƽ��
-        for (int i = 0; i < N; ++i) {
-            pdata->bufferlist.Add((abs(fftData2[i]) + abs(fftData1[i]))/ 2);/*
-            bufferlist.Add(myData2[i].real());*/
-            //
-        }
-        /*for (int i = 0; i < N ; ++i) {
-            pdata->bufferlist.Add((float)pBuf1[i]);
-        }*/
-        //pdata->bufferlist[0] /= 2;
-        pdata->count = ucount;
-    }
-}
-
-void SetDeviceInfo(AkOutputDeviceID defaultOutputDeviceId, AkChannelConfig& Config, Ak3DAudioSinkCapabilities& SinkCapabilities){
-    AK::SoundEngine::GetOutputDeviceConfiguration(defaultOutputDeviceId, Config, SinkCapabilities);
-}
-
-//void CaptureCallback(AkAudioBuffer& in_CaptureBuffer, AkOutputDeviceID in_idOutput, void* in_pCookie)
-//{
-//    const unsigned uSampleCount = static_cast<unsigned>(in_CaptureBuffer.uValidFrames) * in_CaptureBuffer.NumChannels();
-//
-//    if (!uSampleCount)
-//        return;
-//
-//    UAkAudioSampler::SaveBufferAndChannels(in_CaptureBuffer, in_CaptureBuffer.NumChannels(),uSampleCount);
-//}
-
-void UAkAudioSampler::HackerCallback(
-    AkAudioBuffer* io_pBufferOut
-)
+struct FVisualizationQueueSlot
 {
-    const unsigned uSampleCount = static_cast<unsigned>(io_pBufferOut->uValidFrames) * io_pBufferOut->NumChannels();
+	std::atomic<uint64> Sequence;
+	AkAudioBusHackerVisualizationData Data;
+};
 
-    if (!uSampleCount)
-        return;
+class FVisualizationQueue
+{
+public:
+	FVisualizationQueue()
+		: EnqueuePosition(0)
+		, DequeuePosition(0)
+	{
+		for (uint64 Index = 0; Index < VisualizationQueueCapacity; ++Index)
+		{
+			Slots[Index].Sequence.store(Index, std::memory_order_relaxed);
+		}
+	}
 
-    UAkAudioSampler::SaveBufferAndChannels(io_pBufferOut, io_pBufferOut->NumChannels(), uSampleCount);
+	bool Enqueue(const AkAudioBusHackerVisualizationData& Data)
+	{
+		uint64 Position = EnqueuePosition.load(std::memory_order_relaxed);
+		FVisualizationQueueSlot* Slot = nullptr;
+
+		for (;;)
+		{
+			Slot = &Slots[Position % VisualizationQueueCapacity];
+			const uint64 Sequence = Slot->Sequence.load(std::memory_order_acquire);
+			const int64 Difference = static_cast<int64>(Sequence) - static_cast<int64>(Position);
+			if (Difference == 0)
+			{
+				if (EnqueuePosition.compare_exchange_weak(
+					Position,
+					Position + 1,
+					std::memory_order_relaxed))
+				{
+					break;
+				}
+			}
+			else if (Difference < 0)
+			{
+				return false;
+			}
+			else
+			{
+				Position = EnqueuePosition.load(std::memory_order_relaxed);
+			}
+		}
+
+		Slot->Data = Data;
+		Slot->Sequence.store(Position + 1, std::memory_order_release);
+		return true;
+	}
+
+	bool Dequeue(AkAudioBusHackerVisualizationData& OutData)
+	{
+		uint64 Position = DequeuePosition.load(std::memory_order_relaxed);
+		FVisualizationQueueSlot* Slot = nullptr;
+
+		for (;;)
+		{
+			Slot = &Slots[Position % VisualizationQueueCapacity];
+			const uint64 Sequence = Slot->Sequence.load(std::memory_order_acquire);
+			const int64 Difference = static_cast<int64>(Sequence) - static_cast<int64>(Position + 1);
+			if (Difference == 0)
+			{
+				if (DequeuePosition.compare_exchange_weak(
+					Position,
+					Position + 1,
+					std::memory_order_relaxed))
+				{
+					break;
+				}
+			}
+			else if (Difference < 0)
+			{
+				return false;
+			}
+			else
+			{
+				Position = DequeuePosition.load(std::memory_order_relaxed);
+			}
+		}
+
+		OutData = Slot->Data;
+		Slot->Sequence.store(Position + VisualizationQueueCapacity, std::memory_order_release);
+		return true;
+	}
+
+private:
+	FVisualizationQueueSlot Slots[VisualizationQueueCapacity];
+	std::atomic<uint64> EnqueuePosition;
+	std::atomic<uint64> DequeuePosition;
+};
+
+FVisualizationQueue VisualizationQueue;
+FCriticalSection VisualizationCacheMutex;
+TMap<AkUInt32, AkAudioBusHackerVisualizationData> LatestVisualizationByBus;
+AkAudioBusHackerVisualizationData LatestVisualization{};
+bool HasLatestVisualization = false;
+
+bool IsValidVisualizationData(const AkAudioBusHackerVisualizationData* Data)
+{
+	return Data
+		&& Data->uVersion == AK_AUDIO_BUS_HACKER_VISUALIZATION_VERSION
+		&& Data->uStructSize >= sizeof(AkAudioBusHackerVisualizationData);
 }
 
-//void CaptureCallbackVolume(AkSpeakerVolumeMatrixCallbackInfo* in_pCallbackInfo){
-//    in_pCallbackInfo.
-//
-//}
+void DrainVisualizationQueue()
+{
+	AkAudioBusHackerVisualizationData Data{};
+	while (VisualizationQueue.Dequeue(Data))
+	{
+		if (!IsValidVisualizationData(&Data))
+		{
+			continue;
+		}
+
+		LatestVisualizationByBus.FindOrAdd(Data.uBusID) = Data;
+		LatestVisualization = Data;
+		HasLatestVisualization = true;
+	}
+}
+
+void CopyVisualizationData(
+	const AkAudioBusHackerVisualizationData& Source,
+	FAkAudioBusHackerVisualizationData& Destination)
+{
+	Destination = FAkAudioBusHackerVisualizationData{};
+	Destination.Sequence = static_cast<int64>(Source.uSequence);
+	Destination.BusID = static_cast<int64>(Source.uBusID);
+	Destination.SampleRate = static_cast<int32>(Source.uSampleRate);
+	Destination.ChannelConfig = static_cast<int64>(Source.uChannelConfig);
+	Destination.NumChannels = static_cast<int32>(Source.uNumChannels);
+	Destination.AnalyzedChannels = static_cast<int32>(Source.uAnalyzedChannels);
+	Destination.Frames = static_cast<int32>(Source.uFrames);
+	Destination.SpectrumMinHz = Source.fSpectrumMinHz;
+	Destination.SpectrumMaxHz = Source.fSpectrumMaxHz;
+	Destination.StereoCorrelation = Source.fStereoCorrelation;
+	Destination.DownstreamGain = Source.fDownstreamGain;
+
+	const int32 ChannelCount = FMath::Min(
+		static_cast<int32>(Source.uAnalyzedChannels),
+		static_cast<int32>(AK_AUDIO_BUS_HACKER_MAX_CHANNELS));
+	Destination.ChannelPeakDb.Append(Source.fChannelPeakDb, ChannelCount);
+	Destination.ChannelRmsDb.Append(Source.fChannelRmsDb, ChannelCount);
+
+	const int32 WaveformBinCount = FMath::Min(
+		static_cast<int32>(Source.uWaveformBins),
+		static_cast<int32>(AK_AUDIO_BUS_HACKER_WAVEFORM_BINS));
+	Destination.WaveformMin.Append(Source.fWaveformMin, WaveformBinCount);
+	Destination.WaveformMax.Append(Source.fWaveformMax, WaveformBinCount);
+
+	const int32 SpectrumBinCount = FMath::Min(
+		static_cast<int32>(Source.uSpectrumBins),
+		static_cast<int32>(AK_AUDIO_BUS_HACKER_SPECTRUM_BINS));
+	Destination.SpectrumDb.Append(Source.fSpectrumDb, SpectrumBinCount);
+	Destination.SpectrumFrequenciesHz.Reserve(SpectrumBinCount);
+
+	const float FrequencyRatio = Source.fSpectrumMinHz > 0.0f
+		? Source.fSpectrumMaxHz / Source.fSpectrumMinHz
+		: 0.0f;
+	for (int32 Bin = 0; Bin < SpectrumBinCount; ++Bin)
+	{
+		const float Alpha = SpectrumBinCount > 1
+			? static_cast<float>(Bin) / static_cast<float>(SpectrumBinCount - 1)
+			: 0.0f;
+		const float Frequency = FrequencyRatio > 0.0f
+			? Source.fSpectrumMinHz * FMath::Pow(FrequencyRatio, Alpha)
+			: 0.0f;
+		Destination.SpectrumFrequenciesHz.Add(Frequency);
+	}
+}
+} // namespace
+
+UAkAudioSampler::UAkAudioSampler(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+}
+
 int32 UAkAudioSampler::RegisterCatchBuffer()
 {
-   //int32 test = (int32) SetAudioBusHackerCallbacks(HackerCallback);
-
-
-    //GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Your debug message here"));
-    #if PLATFORM_WINDOWS
-    if (FAkAudioSamplerModule::SetCallBackFunc) {
-        
-        return FAkAudioSamplerModule::SetCallBackFunc(HackerCallback);
-    }
-    else {
-        return 1;
-    }
-    #elif PLATFORM_ANDROID
-        SetAudioBusHackerCallbacks(HackerCallback);
-        return 3;
-    #endif
-    //FString platform = TEXT("x64_vc160/Profile/bin/");
-    //FString path = IPluginManager::Get().FindPlugin("Wwise")->GetBaseDir();
-    //FString dllpath = path + "/ThirdParty/" + platform + "AudioBusHacker.dll";
-    //auto PdfDllHandle = FPlatformProcess::GetDllHandle(*dllpath);
-    //if (PdfDllHandle) {
-    //    FString procName = "SetAudioBusHackerCallbacks"; // The exact name of the DLL function.
-    //    SABH SetCallBackFunc = (SABH)FPlatformProcess::GetDllExport(PdfDllHandle, *procName);
-    //    if (SetCallBackFunc) {
-
-    //        SetCallBackFunc(HackerCallback);
-    //        return 9;
-    //    }
-    //    return 4;
-    //}
-    // return 5;//test;
+	return FAkAudioSamplerModule::SetVisualizationCallback(&UAkAudioSampler::VisualizationCallback);
 }
+
+int32 UAkAudioSampler::UnregisterCatchBuffer()
+{
+	return FAkAudioSamplerModule::SetVisualizationCallback(nullptr);
+}
+
+bool UAkAudioSampler::IsVisualizationAvailable()
+{
+	return FAkAudioSamplerModule::IsVisualizationCallbackAvailable();
+}
+
+bool UAkAudioSampler::GetLatestVisualizationData(
+	int64 BusID,
+	FAkAudioBusHackerVisualizationData& OutData)
+{
+	FScopeLock Lock(&VisualizationCacheMutex);
+	DrainVisualizationQueue();
+
+	const AkAudioBusHackerVisualizationData* Source = nullptr;
+	if (BusID < 0)
+	{
+		Source = HasLatestVisualization ? &LatestVisualization : nullptr;
+	}
+	else if (BusID <= MAX_uint32)
+	{
+		Source = LatestVisualizationByBus.Find(static_cast<AkUInt32>(BusID));
+	}
+
+	if (!Source)
+	{
+		OutData = FAkAudioBusHackerVisualizationData{};
+		return false;
+	}
+
+	CopyVisualizationData(*Source, OutData);
+	return true;
+}
+
+TArray<int64> UAkAudioSampler::GetVisualizationBusIDs()
+{
+	FScopeLock Lock(&VisualizationCacheMutex);
+	DrainVisualizationQueue();
+
+	TArray<int64> Result;
+	Result.Reserve(LatestVisualizationByBus.Num());
+	for (const TPair<AkUInt32, AkAudioBusHackerVisualizationData>& Pair : LatestVisualizationByBus)
+	{
+		Result.Add(static_cast<int64>(Pair.Key));
+	}
+	Result.Sort();
+	return Result;
+}
+
+TArray<float> UAkAudioSampler::UpdateSampleSpecturmCallback(float DeltaTime, int32& Tick)
+{
+	(void)DeltaTime;
+	FAkAudioBusHackerVisualizationData Data;
+	if (GetLatestVisualizationData(-1, Data))
+	{
+		Tick = static_cast<int32>(Data.Sequence & MAX_int32);
+		return Data.SpectrumDb;
+	}
+
+	Tick = 0;
+	return TArray<float>();
+}
+
 void UAkAudioSampler::StopEventByID(int32 ID)
 {
-    auto* SoundEngine = IWwiseSoundEngineAPI::Get();
-    SoundEngine->StopPlayingID(ID);
+	if (IWwiseSoundEngineAPI* SoundEngine = IWwiseSoundEngineAPI::Get())
+	{
+		SoundEngine->StopPlayingID(static_cast<AkPlayingID>(ID));
+	}
 }
-//int32 UAkAudioSampler::RegisterCatchBuffer()
-//{
-//    if (pdata == NULL) {
-//        pdata = new Samplerdata();
-//    }
-//    //��ʼ��Soundengine
-//    AkMemSettings mgrSettings;
-//    AkStreamMgrSettings streamsettings;
-//    AkDeviceSettings deviceSettings;
-//    AkInitSettings          initSettings;
-//    AkPlatformInitSettings  platformInitSettings;
-//
-//    AK::MemoryMgr::GetDefaultSettings(mgrSettings);
-//    AK::MemoryMgr::Init(& mgrSettings);
-//    AK::StreamMgr::GetDefaultSettings(streamsettings);
-//    AK::StreamMgr::Create(streamsettings);
-//    AK::StreamMgr::GetDefaultDeviceSettings(deviceSettings);
-//    initSettings.uMaxNumPaths = 16;
-//    AK::SoundEngine::GetDefaultInitSettings(initSettings);
-//    AK::SoundEngine::GetDefaultPlatformInitSettings(platformInitSettings);
-//    //FAkSoundEngineInitialization::Initialize();
-//    auto* SoundEngine = IWwiseSoundEngineAPI::Get();
-//    int32 Initcallback = SoundEngine->Init(&initSettings, &platformInitSettings);
-//
-//    pdata->m_defaultOutputDeviceId = SoundEngine->GetOutputID(AK_INVALID_UNIQUE_ID, 0);
-//    SetDeviceInfo(pdata->m_defaultOutputDeviceId, pdata->channelConfig, pdata->audioSinkCapabilities);
-//
-//    SoundEngine->RenderAudio();
-//    //ע�Ჶ��Buffer�ص�
-//    AKRESULT RegistCB = SoundEngine->RegisterCaptureCallback(&CaptureCallback, pdata->m_defaultOutputDeviceId, pdata->cookie);
-//    //AKRESULT RegistCBvolume = SoundEngine->RegisterBusVolumeCallback(0,, pdata->cookie);
-//    return Initcallback;
-//}
 
-
-TArray<float> UAkAudioSampler::UpdateSampleSpecturmCallback(float deltaTime, int32& tick)
+void UAkAudioSampler::VisualizationCallback(const AkAudioBusHackerVisualizationData* InData)
 {
-    //auto* SoundEngine = IWwiseSoundEngineAPI::Get();
-    tick = pdata->count;//SoundEngine->GetBufferTick();
-    if (pdata->count>0){
-        return pdata->bufferlist;
-    }
-    return TArray<float>{0};
-}
+	if (!IsValidVisualizationData(InData))
+	{
+		return;
+	}
 
-//int32 UAkAudioSampler::UnRegisterCatchBuffer()
-//{
-//    auto* SoundEngine = IWwiseSoundEngineAPI::Get();
-//    AKRESULT UnRegistCB = SoundEngine->UnregisterCaptureCallback(&CaptureCallback, pdata->m_defaultOutputDeviceId, pdata->cookie);
-//    delete pdata;
-//    pdata = NULL;
-//    return UnRegistCB;
-//}
+	if (!VisualizationQueue.Enqueue(*InData))
+	{
+		AkAudioBusHackerVisualizationData DroppedData{};
+		VisualizationQueue.Dequeue(DroppedData);
+		VisualizationQueue.Enqueue(*InData);
+	}
+}

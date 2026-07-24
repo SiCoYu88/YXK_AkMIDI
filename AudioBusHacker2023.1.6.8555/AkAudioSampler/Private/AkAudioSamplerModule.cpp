@@ -1,45 +1,130 @@
 // Copyright 1998-2018 Epic Games, Inc. All Rights Reserved.
 
 #include "AkAudioSamplerModule.h"
+
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/Paths.h"
 
 IMPLEMENT_MODULE(FAkAudioSamplerModule, AkAudioSampler)
 
-FAkAudioSamplerModule* FAkAudioSamplerModule::AkAudioSamplerModuleIntance = nullptr;
+DEFINE_LOG_CATEGORY_STATIC(LogAkAudioSampler, Log, All);
 
-SABH FAkAudioSamplerModule::SetCallBackFunc = NULL;
+#if PLATFORM_ANDROID
+AK_STATIC_LINK_PLUGIN(AudioBusHackerFX);
+#endif
+
+FSetAudioBusHackerVisualizationCallback FAkAudioSamplerModule::SetVisualizationCallbackFunc = nullptr;
+void* FAkAudioSamplerModule::AudioBusHackerDllHandle = nullptr;
 
 void FAkAudioSamplerModule::StartupModule()
 {
-	
-	//// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
-	////if (AkAudioSamplerModuleIntance)
-	////{
-	////	return;
-	////}
-    #if PLATFORM_64BITS
-		//UE_LOG(LogTemp, Log, TEXT("FIND!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"));
-		FString platform = TEXT("x64_vc170/Profile/bin/");
+#if PLATFORM_WINDOWS
+	const TSharedPtr<IPlugin> WwisePlugin = IPluginManager::Get().FindPlugin(TEXT("Wwise"));
+	if (!WwisePlugin.IsValid())
+	{
+		UE_LOG(LogAkAudioSampler, Error, TEXT("Unable to locate the Wwise plugin."));
+		return;
+	}
 
-		FString path = IPluginManager::Get().FindPlugin("Wwise")->GetBaseDir();
-		FString dllpath = path + "/ThirdParty/" + platform + "AudioBusHacker.dll";
-		UE_LOG(LogTemp, Log, TEXT("%s"),*dllpath);
-		auto PdfDllHandle = FPlatformProcess::GetDllHandle(*dllpath);
-		if (PdfDllHandle)
+#if UE_BUILD_SHIPPING || UE_BUILD_TEST
+	const TCHAR* PreferredConfiguration = TEXT("Release");
+#elif UE_BUILD_DEBUG
+	const TCHAR* PreferredConfiguration = TEXT("Debug");
+#else
+	const TCHAR* PreferredConfiguration = TEXT("Profile");
+#endif
+
+	const TCHAR* Configurations[] =
+	{
+		PreferredConfiguration,
+		TEXT("Profile"),
+		TEXT("Release"),
+		TEXT("Debug")
+	};
+
+	for (const TCHAR* Configuration : Configurations)
+	{
+		const FString DllPath = FPaths::Combine(
+			WwisePlugin->GetBaseDir(),
+			TEXT("ThirdParty"),
+			TEXT("x64_vc170"),
+			Configuration,
+			TEXT("bin"),
+			TEXT("AudioBusHacker.dll"));
+		if (!IFileManager::Get().FileExists(*DllPath))
 		{
-			SetCallBackFunc = (SABH)FPlatformProcess::GetDllExport(PdfDllHandle, TEXT("SetAudioBusHackerCallbacks")); // Export the DLL function.
-			if (SetCallBackFunc != NULL) {
-			}
+			continue;
 		}
-	#endif
-	AkAudioSamplerModuleIntance = this;
+
+		void* CandidateHandle = FPlatformProcess::GetDllHandle(*DllPath);
+		if (!CandidateHandle)
+		{
+			continue;
+		}
+
+		FSetAudioBusHackerVisualizationCallback CandidateFunction =
+			reinterpret_cast<FSetAudioBusHackerVisualizationCallback>(
+				FPlatformProcess::GetDllExport(
+					CandidateHandle,
+					TEXT("SetAudioBusHackerVisualizationCallback")));
+		if (!CandidateFunction)
+		{
+			FPlatformProcess::FreeDllHandle(CandidateHandle);
+			continue;
+		}
+
+		AudioBusHackerDllHandle = CandidateHandle;
+		SetVisualizationCallbackFunc = CandidateFunction;
+		UE_LOG(LogAkAudioSampler, Log, TEXT("Loaded AudioBusHacker visualization API from %s"), *DllPath);
+		break;
+	}
+
+	if (!SetVisualizationCallbackFunc)
+	{
+		UE_LOG(
+			LogAkAudioSampler,
+			Error,
+			TEXT("AudioBusHacker.dll with the visualization API was not found in Wwise/ThirdParty."));
+	}
+#endif
 }
 
 void FAkAudioSamplerModule::ShutdownModule()
 {
-	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
-	// we call this function before unloading the module.
-	AkAudioSamplerModuleIntance = nullptr;
+	if (IsVisualizationCallbackAvailable())
+	{
+		SetVisualizationCallback(nullptr);
+	}
+	SetVisualizationCallbackFunc = nullptr;
+
+	if (AudioBusHackerDllHandle)
+	{
+		FPlatformProcess::FreeDllHandle(AudioBusHackerDllHandle);
+		AudioBusHackerDllHandle = nullptr;
+	}
 }
 
+int32 FAkAudioSamplerModule::SetVisualizationCallback(
+	AkAudioBusHackerVisualizationCallbackFunc InCallback)
+{
+#if PLATFORM_WINDOWS
+	return SetVisualizationCallbackFunc ? SetVisualizationCallbackFunc(InCallback) : 1;
+#elif PLATFORM_ANDROID
+	return SetAudioBusHackerVisualizationCallback(InCallback);
+#else
+	return 1;
+#endif
+}
 
+bool FAkAudioSamplerModule::IsVisualizationCallbackAvailable()
+{
+#if PLATFORM_WINDOWS
+	return SetVisualizationCallbackFunc != nullptr;
+#elif PLATFORM_ANDROID
+	return true;
+#else
+	return false;
+#endif
+}

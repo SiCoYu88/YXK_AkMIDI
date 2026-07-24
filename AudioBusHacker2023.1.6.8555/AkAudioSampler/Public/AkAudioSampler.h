@@ -2,63 +2,108 @@
 
 #include "CoreMinimal.h"
 #include "AkAudioType.h"
-#include "AkAudioDevice.h"
-#include "AkComponent.h"
-#include "Kismet/BlueprintFunctionLibrary.h"
-#include "AkAudioSamplerModule.h"
 #include "AkAudioSampler.generated.h"
-/**
- * 
- */
+
+struct AkAudioBusHackerVisualizationData;
+
+USTRUCT(BlueprintType)
+struct AKAUDIOSAMPLER_API FAkAudioBusHackerVisualizationData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int64 Sequence = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int64 BusID = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int32 SampleRate = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int64 ChannelConfig = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int32 NumChannels = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int32 AnalyzedChannels = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	int32 Frames = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	float SpectrumMinHz = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	float SpectrumMaxHz = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	float StereoCorrelation = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	float DownstreamGain = 1.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> ChannelPeakDb;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> ChannelRmsDb;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> WaveformMin;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> WaveformMax;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> SpectrumDb;
+
+	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
+	TArray<float> SpectrumFrequenciesHz;
+};
 
 UCLASS(Blueprintable)
-
 class AKAUDIOSAMPLER_API UAkAudioSampler : public UAkAudioType
 {
 	GENERATED_BODY()
 
 public:
-	UAkAudioSampler(const class FObjectInitializer& ObjectInitializer);
+	UAkAudioSampler(const FObjectInitializer& ObjectInitializer);
 
-	/**
-	 * @brief Regist Get Audio Buffer Callback per Frame.
-	 * @return SpecutrumArray.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise",meta = (DisplayName = "UpdateSampleSpecturmCallback"))
-	static TArray<float>UpdateSampleSpecturmCallback(float deltaTime, int32& tick);
-
-	/**
-	 * @brief InitSoundEngine.For AudioSampler.
-	 * @return InitCallBack.
-	 */
-
-	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "RegisterCatchBuffer"))
+	/** Registers the fixed-size visualization callback exported by AudioBusHacker. */
+	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "Register Audio Bus Visualization"))
 	static int32 RegisterCatchBuffer();
 
+	/** Stops AudioBusHacker from calling into this UE module. */
+	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "Unregister Audio Bus Visualization"))
+	static int32 UnregisterCatchBuffer();
 
-
-	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "StopEventByID"))
-	static void StopEventByID(int32 ID);
+	/** Returns whether the AudioBusHacker visualization export was loaded. */
+	UFUNCTION(BlueprintPure, Category = "H3D | Wwise", meta = (DisplayName = "Is Audio Bus Visualization Available"))
+	static bool IsVisualizationAvailable();
 
 	/**
- * @brief InitSoundEngine.For AudioSampler.
- * @return InitCallBack.
- */
-	//UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "UnRegisterCatchBuffer"))
-	//static int32 UnRegisterCatchBuffer();
+	 * Returns the newest snapshot for BusID. Pass -1 to return the newest snapshot
+	 * from any AudioBusHacker instance.
+	 */
+	UFUNCTION(BlueprintPure, Category = "H3D | Wwise", meta = (DisplayName = "Get Audio Bus Visualization"))
+	static bool GetLatestVisualizationData(int64 BusID, FAkAudioBusHackerVisualizationData& OutData);
 
-	static void SaveBufferAndChannels(AkAudioBuffer* buffer, unsigned Numchannels, unsigned ucount);
+	/** Returns the Wwise bus IDs that have produced at least one snapshot. */
+	UFUNCTION(BlueprintPure, Category = "H3D | Wwise", meta = (DisplayName = "Get Audio Bus Visualization IDs"))
+	static TArray<int64> GetVisualizationBusIDs();
 
-	struct Samplerdata {
-		 unsigned count;
-		 unsigned sampleRate;
-		 void* cookie;
-		 AkOutputDeviceID m_defaultOutputDeviceId;
-		 AkChannelConfig channelConfig;
-		 Ak3DAudioSinkCapabilities audioSinkCapabilities;
-		 TArray<float>bufferlist;
+	/**
+	 * Legacy Blueprint node. The returned values now come from Wwise's 64-bin
+	 * logarithmic spectrum and are expressed in dBFS.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "Update Sample Spectrum Callback"))
+	static TArray<float> UpdateSampleSpecturmCallback(float DeltaTime, int32& Tick);
 
-	};
+	UFUNCTION(BlueprintCallable, Category = "H3D | Wwise", meta = (DisplayName = "Stop Event By ID"))
+	static void StopEventByID(int32 ID);
 
-	static void HackerCallback(AkAudioBuffer* io_pBufferOut);
+	/** Called on the Wwise audio thread. It must remain allocation-free and non-blocking. */
+	static void VisualizationCallback(const AkAudioBusHackerVisualizationData* InData);
 };
