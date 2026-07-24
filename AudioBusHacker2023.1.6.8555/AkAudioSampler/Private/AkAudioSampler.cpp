@@ -2,6 +2,7 @@
 
 #include <atomic>
 
+#include "AkAudioDevice.h"
 #include "AkAudioSamplerModule.h"
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
@@ -137,11 +138,12 @@ void DrainVisualizationQueue()
 
 void CopyVisualizationData(
 	const AkAudioBusHackerVisualizationData& Source,
+	const FString& BusName,
 	FAkAudioBusHackerVisualizationData& Destination)
 {
 	Destination = FAkAudioBusHackerVisualizationData{};
 	Destination.Sequence = static_cast<int64>(Source.uSequence);
-	Destination.BusID = static_cast<int64>(Source.uBusID);
+	Destination.BusName = BusName;
 	Destination.SampleRate = static_cast<int32>(Source.uSampleRate);
 	Destination.ChannelConfig = static_cast<int64>(Source.uChannelConfig);
 	Destination.NumChannels = static_cast<int32>(Source.uNumChannels);
@@ -207,55 +209,45 @@ bool UAkAudioSampler::IsVisualizationAvailable()
 }
 
 bool UAkAudioSampler::GetLatestVisualizationData(
-	int64 BusID,
+	const FString& BusName,
 	FAkAudioBusHackerVisualizationData& OutData)
 {
+	const AkUInt32 BusID = FAkAudioDevice::GetShortIDFromString(BusName);
+	if (BusID == AK_INVALID_UNIQUE_ID)
+	{
+		OutData = FAkAudioBusHackerVisualizationData{};
+		return false;
+	}
+
 	FScopeLock Lock(&VisualizationCacheMutex);
 	DrainVisualizationQueue();
 
-	const AkAudioBusHackerVisualizationData* Source = nullptr;
-	if (BusID < 0)
-	{
-		Source = HasLatestVisualization ? &LatestVisualization : nullptr;
-	}
-	else if (BusID <= MAX_uint32)
-	{
-		Source = LatestVisualizationByBus.Find(static_cast<AkUInt32>(BusID));
-	}
-
+	const AkAudioBusHackerVisualizationData* Source = LatestVisualizationByBus.Find(BusID);
 	if (!Source)
 	{
 		OutData = FAkAudioBusHackerVisualizationData{};
 		return false;
 	}
 
-	CopyVisualizationData(*Source, OutData);
+	CopyVisualizationData(*Source, BusName, OutData);
 	return true;
-}
-
-TArray<int64> UAkAudioSampler::GetVisualizationBusIDs()
-{
-	FScopeLock Lock(&VisualizationCacheMutex);
-	DrainVisualizationQueue();
-
-	TArray<int64> Result;
-	Result.Reserve(LatestVisualizationByBus.Num());
-	for (const TPair<AkUInt32, AkAudioBusHackerVisualizationData>& Pair : LatestVisualizationByBus)
-	{
-		Result.Add(static_cast<int64>(Pair.Key));
-	}
-	Result.Sort();
-	return Result;
 }
 
 TArray<float> UAkAudioSampler::UpdateSampleSpecturmCallback(float DeltaTime, int32& Tick)
 {
 	(void)DeltaTime;
-	FAkAudioBusHackerVisualizationData Data;
-	if (GetLatestVisualizationData(-1, Data))
+	FScopeLock Lock(&VisualizationCacheMutex);
+	DrainVisualizationQueue();
+
+	if (HasLatestVisualization)
 	{
-		Tick = static_cast<int32>(Data.Sequence & MAX_int32);
-		return Data.SpectrumDb;
+		Tick = static_cast<int32>(LatestVisualization.uSequence & MAX_int32);
+		const int32 SpectrumBinCount = FMath::Min(
+			static_cast<int32>(LatestVisualization.uSpectrumBins),
+			static_cast<int32>(AK_AUDIO_BUS_HACKER_SPECTRUM_BINS));
+		TArray<float> Spectrum;
+		Spectrum.Append(LatestVisualization.fSpectrumDb, SpectrumBinCount);
+		return Spectrum;
 	}
 
 	Tick = 0;

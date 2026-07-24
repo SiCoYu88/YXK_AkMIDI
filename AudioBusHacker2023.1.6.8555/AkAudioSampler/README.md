@@ -16,8 +16,8 @@ UE 不再接收原始 PCM 或自行执行 FFT。
 
 1. Wwise SoundEngine 初始化后，确认 `Is Audio Bus Visualization Available` 为 true，
    再调用 `Register Audio Bus Visualization`。
-2. 只有一个 Bus 时，调用 `Get Audio Bus Visualization` 并将 `BusID` 设为 `-1`。
-3. 多个 Bus 时，先调用 `Get Audio Bus Visualization IDs`，再用指定 ID 查询。
+2. 调用 `Get Audio Bus Visualization`，直接传入 Wwise Bus 名称，例如 `Music`。
+3. C++ 内部会将名称转换为 Wwise Short ID，并查询对应 Bus 的最新快照。
 4. 模块卸载或不再需要数据时，调用 `Unregister Audio Bus Visualization`。
 
 返回结构包含：
@@ -25,7 +25,10 @@ UE 不再接收原始 PCM 或自行执行 FFT。
 - 每声道 Peak/RMS，单位 dBFS；
 - 128 段波形最小值和最大值，线性幅度；
 - 64 段对数频谱及对应频率，频谱单位 dBFS、频率单位 Hz；
-- 立体声相关度、下游增益、采样率、声道数和 Bus ID。
+- 立体声相关度、下游增益、采样率、声道数和 Bus 名称。
+
+Short ID 只在 C++ 内部用于匹配 Wwise 回调数据，不会暴露给蓝图。返回结构中的
+`BusName` 是查询时传入的名称；Wwise Short ID 是单向哈希，不能从回调 ID 反查名称。
 
 为兼容已有蓝图，`Update Sample Spectrum Callback` 节点仍然保留。它现在返回
 Wwise 侧计算的 64 段 `SpectrumDb`，`Tick` 对应快照序号，不再返回 UE 侧 FFT 的线性幅度。

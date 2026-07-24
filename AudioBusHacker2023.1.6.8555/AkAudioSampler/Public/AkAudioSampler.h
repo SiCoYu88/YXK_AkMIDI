@@ -15,7 +15,7 @@ struct AKAUDIOSAMPLER_API FAkAudioBusHackerVisualizationData
 	int64 Sequence = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
-	int64 BusID = 0;
+	FString BusName;
 
 	UPROPERTY(BlueprintReadOnly, Category = "H3D | Wwise")
 	int32 SampleRate = 0;
@@ -84,15 +84,11 @@ public:
 	static bool IsVisualizationAvailable();
 
 	/**
-	 * Returns the newest snapshot for BusID. Pass -1 to return the newest snapshot
-	 * from any AudioBusHacker instance.
+	 * Returns the newest snapshot for the named Wwise Bus. The Short ID is
+	 * generated internally and is not exposed to Blueprint.
 	 */
 	UFUNCTION(BlueprintPure, Category = "H3D | Wwise", meta = (DisplayName = "Get Audio Bus Visualization"))
-	static bool GetLatestVisualizationData(int64 BusID, FAkAudioBusHackerVisualizationData& OutData);
-
-	/** Returns the Wwise bus IDs that have produced at least one snapshot. */
-	UFUNCTION(BlueprintPure, Category = "H3D | Wwise", meta = (DisplayName = "Get Audio Bus Visualization IDs"))
-	static TArray<int64> GetVisualizationBusIDs();
+	static bool GetLatestVisualizationData(const FString& BusName, FAkAudioBusHackerVisualizationData& OutData);
 
 	/**
 	 * Legacy Blueprint node. The returned values now come from Wwise's 64-bin
