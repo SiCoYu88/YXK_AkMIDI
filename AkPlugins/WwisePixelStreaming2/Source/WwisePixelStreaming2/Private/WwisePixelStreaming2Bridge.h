@@ -7,17 +7,17 @@
 
 #include <atomic>
 
-#include "AkWwisePixelStreamingModule.h"
-#include "AkWwiseAudioQueue.h"
+#include "WwisePixelStreaming2Module.h"
+#include "WwiseAudioQueue.h"
 
 class FAkAudioDevice;
 class IPixelStreaming2Streamer;
 
-class FAkWwisePixelStreamingProducer final : public IPixelStreaming2AudioProducer
+class FWwisePixelStreaming2Producer final : public IPixelStreaming2AudioProducer
 {
 };
 
-struct FAkWwisePixelStreamingConfig
+struct FWwisePixelStreaming2Config
 {
 	bool bEnabled = true;
 	FString StreamerId;
@@ -27,19 +27,19 @@ struct FAkWwisePixelStreamingConfig
 	int32 MaxChannels = 16;
 	float Gain = 1.0f;
 
-	static FAkWwisePixelStreamingConfig Load();
+	static FWwisePixelStreaming2Config Load();
 };
 
-class FAkWwisePixelStreamingBridge final : public FRunnable
+class FWwisePixelStreaming2Bridge final : public FRunnable
 {
 public:
-	explicit FAkWwisePixelStreamingBridge(const FAkWwisePixelStreamingConfig& InConfig);
-	virtual ~FAkWwisePixelStreamingBridge() override;
+	explicit FWwisePixelStreaming2Bridge(const FWwisePixelStreaming2Config& InConfig);
+	virtual ~FWwisePixelStreaming2Bridge() override;
 
 	bool Start();
 	void StopBridge();
 	void TryInitialize();
-	FAkWwisePixelStreamingStats GetStats() const;
+	FWwisePixelStreaming2Stats GetStats() const;
 
 	virtual uint32 Run() override;
 	virtual void Stop() override;
@@ -52,9 +52,9 @@ private:
 	void DetachStreamer();
 	void ApplyGain(float* Data, int32 NumSamples) const;
 
-	FAkWwisePixelStreamingConfig Config;
-	TUniquePtr<FAkWwiseAudioQueue> Queue;
-	TSharedPtr<FAkWwisePixelStreamingProducer> Producer;
+	FWwisePixelStreaming2Config Config;
+	TUniquePtr<FWwiseAudioQueue> Queue;
+	TSharedPtr<FWwisePixelStreaming2Producer> Producer;
 	TWeakPtr<IPixelStreaming2Streamer> Streamer;
 	FAkAudioDevice* WwiseDevice = nullptr;
 	class FRunnableThread* WorkerThread = nullptr;

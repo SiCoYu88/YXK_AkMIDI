@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class AkWwisePixelStreaming : ModuleRules
+public class WwisePixelStreaming2 : ModuleRules
 {
-	public AkWwisePixelStreaming(ReadOnlyTargetRules Target) : base(Target)
+	public WwisePixelStreaming2(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		CppStandard = CppStandardVersion.Default;

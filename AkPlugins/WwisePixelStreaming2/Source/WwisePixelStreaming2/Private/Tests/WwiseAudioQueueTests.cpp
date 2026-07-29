@@ -1,16 +1,16 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "AkWwiseAudioQueue.h"
+#include "WwiseAudioQueue.h"
 #include "Misc/AutomationTest.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FAkWwiseAudioQueueTest,
-	"AkWwisePixelStreaming.AudioQueue.SpscContract",
+	FWwiseAudioQueueTest,
+	"WwisePixelStreaming2.AudioQueue.SpscContract",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FAkWwiseAudioQueueTest::RunTest(const FString& Parameters)
+bool FWwiseAudioQueueTest::RunTest(const FString& Parameters)
 {
-	FAkWwiseAudioQueue Queue(2, 4, 2);
+	FWwiseAudioQueue Queue(2, 4, 2);
 	const float First[] = { 0.0f, 0.1f, 0.2f, 0.3f };
 	const float Second[] = { 0.4f, 0.5f };
 
@@ -19,7 +19,7 @@ bool FAkWwiseAudioQueueTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("full queue rejects without overwriting"), Queue.TryPush(Second, 1, 2, 48000));
 	TestFalse(TEXT("oversized frame is rejected"), Queue.TryPush(First, 5, 2, 48000));
 
-	FAkWwiseAudioFrame Frame;
+	FWwiseAudioFrame Frame;
 	TestTrue(TEXT("first frame can be read"), Queue.TryPeek(Frame));
 	TestEqual(TEXT("frame count is preserved"), Frame.NumFrames, 2);
 	TestEqual(TEXT("channel count is preserved"), Frame.NumChannels, 2);

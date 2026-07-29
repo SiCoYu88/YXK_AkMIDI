@@ -1,8 +1,8 @@
-#include "AkWwiseAudioQueue.h"
+#include "WwiseAudioQueue.h"
 
 #include "HAL/UnrealMemory.h"
 
-FAkWwiseAudioQueue::FAkWwiseAudioQueue(uint32 InCapacity, int32 InMaxFrames, int32 InMaxChannels)
+FWwiseAudioQueue::FWwiseAudioQueue(uint32 InCapacity, int32 InMaxFrames, int32 InMaxChannels)
 	: Capacity(FMath::Max(InCapacity, 2u))
 	, MaxFrames(FMath::Max(InMaxFrames, 1))
 	, MaxChannels(FMath::Max(InMaxChannels, 1))
@@ -15,7 +15,7 @@ FAkWwiseAudioQueue::FAkWwiseAudioQueue(uint32 InCapacity, int32 InMaxFrames, int
 	}
 }
 
-bool FAkWwiseAudioQueue::TryPush(const float* Data, int32 NumFrames, int32 NumChannels, int32 SampleRate)
+bool FWwiseAudioQueue::TryPush(const float* Data, int32 NumFrames, int32 NumChannels, int32 SampleRate)
 {
 	if (Data == nullptr || NumFrames <= 0 || NumFrames > MaxFrames || NumChannels <= 0 || NumChannels > MaxChannels || SampleRate <= 0)
 	{
@@ -39,7 +39,7 @@ bool FAkWwiseAudioQueue::TryPush(const float* Data, int32 NumFrames, int32 NumCh
 	return true;
 }
 
-bool FAkWwiseAudioQueue::TryPeek(FAkWwiseAudioFrame& OutFrame) const
+bool FWwiseAudioQueue::TryPeek(FWwiseAudioFrame& OutFrame) const
 {
 	const uint32 CurrentRead = ReadIndex.load(std::memory_order_relaxed);
 	if (CurrentRead == WriteIndex.load(std::memory_order_acquire))
@@ -55,7 +55,7 @@ bool FAkWwiseAudioQueue::TryPeek(FAkWwiseAudioFrame& OutFrame) const
 	return true;
 }
 
-void FAkWwiseAudioQueue::Pop()
+void FWwiseAudioQueue::Pop()
 {
 	const uint32 CurrentRead = ReadIndex.load(std::memory_order_relaxed);
 	if (CurrentRead != WriteIndex.load(std::memory_order_acquire))

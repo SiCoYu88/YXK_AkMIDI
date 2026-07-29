@@ -4,7 +4,7 @@
 
 #include <atomic>
 
-struct FAkWwiseAudioFrame
+struct FWwiseAudioFrame
 {
 	const float* Data = nullptr;
 	int32 NumFrames = 0;
@@ -12,13 +12,13 @@ struct FAkWwiseAudioFrame
 	int32 SampleRate = 0;
 };
 
-class FAkWwiseAudioQueue
+class FWwiseAudioQueue
 {
 public:
-	FAkWwiseAudioQueue(uint32 InCapacity, int32 InMaxFrames, int32 InMaxChannels);
+	FWwiseAudioQueue(uint32 InCapacity, int32 InMaxFrames, int32 InMaxChannels);
 
 	bool TryPush(const float* Data, int32 NumFrames, int32 NumChannels, int32 SampleRate);
-	bool TryPeek(FAkWwiseAudioFrame& OutFrame) const;
+	bool TryPeek(FWwiseAudioFrame& OutFrame) const;
 	void Pop();
 
 	uint32 GetCapacity() const { return Capacity; }

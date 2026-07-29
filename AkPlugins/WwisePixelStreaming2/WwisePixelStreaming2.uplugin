@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0.0",
-	"FriendlyName": "Ak Wwise Pixel Streaming",
+	"FriendlyName": "Wwise Pixel Streaming 2",
 	"Description": "Routes the Wwise output mix into Pixel Streaming 2.",
 	"Category": "Audio",
 	"CreatedBy": "YXK",
@@ -10,7 +10,7 @@
 	"CanContainContent": false,
 	"Modules": [
 		{
-			"Name": "AkWwisePixelStreaming",
+			"Name": "WwisePixelStreaming2",
 			"Type": "Runtime",
 			"LoadingPhase": "PostEngineInit",
 			"PlatformAllowList": [ "Win64", "Linux", "Mac" ],

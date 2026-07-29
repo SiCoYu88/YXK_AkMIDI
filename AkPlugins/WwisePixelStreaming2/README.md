@@ -1,11 +1,11 @@
-# AkWwisePixelStreaming
+# WwisePixelStreaming2
 
 将 Wwise 最终输出混音通过 Pixel Streaming 2 的 Audio Producer 发送到浏览器。实现针对 UE 5.7 与 Wwise 2025.1，浏览器前端、信令服务器和 SFU 无需修改。
 
 ## 安装
 
-1. 将整个 `AkWwisePixelStreaming` 目录复制到 UE 项目的 `Plugins` 目录。
-2. 确保项目已安装 Wwise 2025.1 集成，并启用 `Wwise`、`PixelStreaming2` 和 `AkWwisePixelStreaming` 插件。
+1. 将整个 `WwisePixelStreaming2` 目录复制到 UE 项目的 `Plugins` 目录。
+2. 确保项目已安装 Wwise 2025.1 集成，并启用 `Wwise`、`PixelStreaming2` 和 `WwisePixelStreaming2` 插件。
 3. 重新生成项目文件并编译。
 
 插件默认启用桥接，并自动绑定 Pixel Streaming 2 的默认 Streamer。Wwise 主输出仍会正常播放。
@@ -15,7 +15,7 @@
 在项目的 `Config/DefaultGame.ini` 中覆盖配置：
 
 ```ini
-[AkWwisePixelStreaming]
+[WwisePixelStreaming2]
 Enabled=true
 StreamerId=
 OutputDeviceId=0

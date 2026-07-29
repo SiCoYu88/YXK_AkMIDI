@@ -1,4 +1,4 @@
-#include "AkWwisePixelStreamingBridge.h"
+#include "WwisePixelStreaming2Bridge.h"
 
 #include "AkAudioDevice.h"
 #include "HAL/Event.h"
@@ -9,16 +9,16 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogAkWwisePixelStreaming, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogWwisePixelStreaming2, Log, All);
 
 namespace
 {
-	constexpr TCHAR ConfigSection[] = TEXT("AkWwisePixelStreaming");
+	constexpr TCHAR ConfigSection[] = TEXT("WwisePixelStreaming2");
 }
 
-FAkWwisePixelStreamingConfig FAkWwisePixelStreamingConfig::Load()
+FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 {
-	FAkWwisePixelStreamingConfig Result;
+	FWwisePixelStreaming2Config Result;
 	if (GConfig == nullptr)
 	{
 		return Result;
@@ -43,21 +43,21 @@ FAkWwisePixelStreamingConfig FAkWwisePixelStreamingConfig::Load()
 	return Result;
 }
 
-FAkWwisePixelStreamingBridge::FAkWwisePixelStreamingBridge(const FAkWwisePixelStreamingConfig& InConfig)
+FWwisePixelStreaming2Bridge::FWwisePixelStreaming2Bridge(const FWwisePixelStreaming2Config& InConfig)
 	: Config(InConfig)
-	, Queue(MakeUnique<FAkWwiseAudioQueue>(InConfig.QueueSlots, InConfig.MaxFrames, InConfig.MaxChannels))
-	, Producer(MakeShared<FAkWwisePixelStreamingProducer>())
+	, Queue(MakeUnique<FWwiseAudioQueue>(InConfig.QueueSlots, InConfig.MaxFrames, InConfig.MaxChannels))
+	, Producer(MakeShared<FWwisePixelStreaming2Producer>())
 	, RegisteredOutputId(InConfig.OutputDeviceId == 0 ? AK_INVALID_OUTPUT_DEVICE_ID : static_cast<AkOutputDeviceID>(InConfig.OutputDeviceId))
 {
 	GainScratch.SetNumUninitialized(Config.MaxFrames * Config.MaxChannels);
 }
 
-FAkWwisePixelStreamingBridge::~FAkWwisePixelStreamingBridge()
+FWwisePixelStreaming2Bridge::~FWwisePixelStreaming2Bridge()
 {
 	StopBridge();
 }
 
-bool FAkWwisePixelStreamingBridge::Start()
+bool FWwisePixelStreaming2Bridge::Start()
 {
 	if (WorkerThread != nullptr)
 	{
@@ -66,7 +66,7 @@ bool FAkWwisePixelStreamingBridge::Start()
 
 	WorkEvent = FPlatformProcess::GetSynchEventFromPool(false);
 	bRunWorker.store(true, std::memory_order_release);
-	WorkerThread = FRunnableThread::Create(this, TEXT("AkWwisePixelStreamingWorker"), 0, TPri_AboveNormal);
+	WorkerThread = FRunnableThread::Create(this, TEXT("WwisePixelStreaming2Worker"), 0, TPri_AboveNormal);
 	if (WorkerThread == nullptr)
 	{
 		bRunWorker.store(false, std::memory_order_release);
@@ -79,7 +79,7 @@ bool FAkWwisePixelStreamingBridge::Start()
 	return true;
 }
 
-void FAkWwisePixelStreamingBridge::StopBridge()
+void FWwisePixelStreaming2Bridge::StopBridge()
 {
 	if (WorkerThread == nullptr && !bCaptureRegistered)
 	{
@@ -93,7 +93,7 @@ void FAkWwisePixelStreamingBridge::StopBridge()
 		const AKRESULT Result = WwiseDevice->UnregisterCaptureCallback(&CaptureCallback, RegisteredOutputId, this);
 		if (Result != AK_Success)
 		{
-			UE_LOG(LogAkWwisePixelStreaming, Warning, TEXT("Failed to unregister Wwise capture callback (AKRESULT %d)."), static_cast<int32>(Result));
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Failed to unregister Wwise capture callback (AKRESULT %d)."), static_cast<int32>(Result));
 		}
 	}
 	bCaptureRegistered = false;
@@ -124,7 +124,7 @@ void FAkWwisePixelStreamingBridge::StopBridge()
 	DetachStreamer();
 }
 
-void FAkWwisePixelStreamingBridge::TryInitialize()
+void FWwisePixelStreaming2Bridge::TryInitialize()
 {
 	if (!bCaptureRegistered)
 	{
@@ -136,9 +136,9 @@ void FAkWwisePixelStreamingBridge::TryInitialize()
 	}
 }
 
-FAkWwisePixelStreamingStats FAkWwisePixelStreamingBridge::GetStats() const
+FWwisePixelStreaming2Stats FWwisePixelStreaming2Bridge::GetStats() const
 {
-	FAkWwisePixelStreamingStats Result;
+	FWwisePixelStreaming2Stats Result;
 	Result.CapturedBuffers = CapturedBuffers.load(std::memory_order_relaxed);
 	Result.PushedBuffers = PushedBuffers.load(std::memory_order_relaxed);
 	Result.DroppedBuffers = DroppedBuffers.load(std::memory_order_relaxed);
@@ -146,13 +146,13 @@ FAkWwisePixelStreamingStats FAkWwisePixelStreamingBridge::GetStats() const
 	return Result;
 }
 
-uint32 FAkWwisePixelStreamingBridge::Run()
+uint32 FWwisePixelStreaming2Bridge::Run()
 {
 	while (bRunWorker.load(std::memory_order_acquire))
 	{
 		WorkEvent->Wait(20);
 
-		FAkWwiseAudioFrame Frame;
+		FWwiseAudioFrame Frame;
 		while (bRunWorker.load(std::memory_order_relaxed) && Queue->TryPeek(Frame))
 		{
 			const int32 NumSamples = Frame.NumFrames * Frame.NumChannels;
@@ -172,7 +172,7 @@ uint32 FAkWwisePixelStreamingBridge::Run()
 	return 0;
 }
 
-void FAkWwisePixelStreamingBridge::Stop()
+void FWwisePixelStreaming2Bridge::Stop()
 {
 	bRunWorker.store(false, std::memory_order_release);
 	if (WorkEvent != nullptr)
@@ -181,9 +181,9 @@ void FAkWwisePixelStreamingBridge::Stop()
 	}
 }
 
-void FAkWwisePixelStreamingBridge::CaptureCallback(AkAudioBuffer& CaptureBuffer, AkOutputDeviceID OutputId, void* Cookie)
+void FWwisePixelStreaming2Bridge::CaptureCallback(AkAudioBuffer& CaptureBuffer, AkOutputDeviceID OutputId, void* Cookie)
 {
-	FAkWwisePixelStreamingBridge* Bridge = static_cast<FAkWwisePixelStreamingBridge*>(Cookie);
+	FWwisePixelStreaming2Bridge* Bridge = static_cast<FWwisePixelStreaming2Bridge*>(Cookie);
 	if (Bridge == nullptr)
 	{
 		return;
@@ -197,7 +197,7 @@ void FAkWwisePixelStreamingBridge::CaptureCallback(AkAudioBuffer& CaptureBuffer,
 	Bridge->ActiveCallbacks.fetch_sub(1, std::memory_order_acq_rel);
 }
 
-void FAkWwisePixelStreamingBridge::OnCapturedAudio(AkAudioBuffer& CaptureBuffer)
+void FWwisePixelStreaming2Bridge::OnCapturedAudio(AkAudioBuffer& CaptureBuffer)
 {
 	const int32 NumFrames = static_cast<int32>(CaptureBuffer.uValidFrames);
 	const int32 NumChannels = static_cast<int32>(CaptureBuffer.NumChannels());
@@ -218,7 +218,7 @@ void FAkWwisePixelStreamingBridge::OnCapturedAudio(AkAudioBuffer& CaptureBuffer)
 	WorkEvent->Trigger();
 }
 
-bool FAkWwisePixelStreamingBridge::TryRegisterWwiseCapture()
+bool FWwisePixelStreaming2Bridge::TryRegisterWwiseCapture()
 {
 	if (!FModuleManager::Get().IsModuleLoaded(TEXT("AkAudio")))
 	{
@@ -250,11 +250,11 @@ bool FAkWwisePixelStreamingBridge::TryRegisterWwiseCapture()
 
 	bAcceptCallbacks.store(true, std::memory_order_release);
 	bCaptureRegistered = true;
-	UE_LOG(LogAkWwisePixelStreaming, Log, TEXT("Capturing Wwise output at %d Hz."), SampleRate);
+	UE_LOG(LogWwisePixelStreaming2, Log, TEXT("Capturing Wwise output at %d Hz."), SampleRate);
 	return true;
 }
 
-bool FAkWwisePixelStreamingBridge::TryAttachStreamer()
+bool FWwisePixelStreaming2Bridge::TryAttachStreamer()
 {
 	if (!IPixelStreaming2Module::IsAvailable())
 	{
@@ -276,11 +276,11 @@ bool FAkWwisePixelStreamingBridge::TryAttachStreamer()
 
 	TargetStreamer->AddAudioProducer(Producer);
 	Streamer = TargetStreamer;
-	UE_LOG(LogAkWwisePixelStreaming, Log, TEXT("Attached Wwise audio producer to Pixel Streaming 2 streamer '%s'."), *TargetId);
+	UE_LOG(LogWwisePixelStreaming2, Log, TEXT("Attached Wwise audio producer to Pixel Streaming 2 streamer '%s'."), *TargetId);
 	return true;
 }
 
-void FAkWwisePixelStreamingBridge::DetachStreamer()
+void FWwisePixelStreaming2Bridge::DetachStreamer()
 {
 	if (TSharedPtr<IPixelStreaming2Streamer> TargetStreamer = Streamer.Pin())
 	{
@@ -289,7 +289,7 @@ void FAkWwisePixelStreamingBridge::DetachStreamer()
 	Streamer.Reset();
 }
 
-void FAkWwisePixelStreamingBridge::ApplyGain(float* Data, int32 NumSamples) const
+void FWwisePixelStreaming2Bridge::ApplyGain(float* Data, int32 NumSamples) const
 {
 	for (int32 Index = 0; Index < NumSamples; ++Index)
 	{

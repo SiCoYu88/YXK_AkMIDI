@@ -1,4 +1,4 @@
-# 编写Wwise音频输入方案文档
+# WwisePixelStreaming2 实现方案
 
 > 先提供Wwise Sink->Pixel Streaming2 Audio Input实现方案文档，不修改代码
 
