@@ -2,6 +2,7 @@
 
 #include "AkAudioDevice.h"
 #include "HAL/Event.h"
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/RunnableThread.h"
 #include "IPixelStreaming2Module.h"
@@ -35,11 +36,13 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	GConfig->GetInt(ConfigSection, TEXT("MaxFrames"), Result.MaxFrames, GGameIni);
 	GConfig->GetInt(ConfigSection, TEXT("MaxChannels"), Result.MaxChannels, GGameIni);
 	GConfig->GetFloat(ConfigSection, TEXT("Gain"), Result.Gain, GGameIni);
+	GConfig->GetFloat(ConfigSection, TEXT("StatusLogIntervalSeconds"), Result.StatusLogIntervalSeconds, GGameIni);
 
 	Result.QueueSlots = FMath::Clamp(Result.QueueSlots, 2, 64);
 	Result.MaxFrames = FMath::Clamp(Result.MaxFrames, 64, 8192);
 	Result.MaxChannels = FMath::Clamp(Result.MaxChannels, 1, 32);
 	Result.Gain = FMath::Clamp(Result.Gain, 0.0f, 8.0f);
+	Result.StatusLogIntervalSeconds = FMath::Clamp(Result.StatusLogIntervalSeconds, 0.0f, 60.0f);
 	return Result;
 }
 
@@ -143,7 +146,50 @@ FWwisePixelStreaming2Stats FWwisePixelStreaming2Bridge::GetStats() const
 	Result.PushedBuffers = PushedBuffers.load(std::memory_order_relaxed);
 	Result.DroppedBuffers = DroppedBuffers.load(std::memory_order_relaxed);
 	Result.RejectedBuffers = RejectedBuffers.load(std::memory_order_relaxed);
+	Result.NonSilentBuffers = NonSilentBuffers.load(std::memory_order_relaxed);
+	Result.LastPeak = LastPeak.load(std::memory_order_relaxed);
+	Result.MaxPeak = MaxPeak.load(std::memory_order_relaxed);
+	Result.LastNumFrames = LastNumFrames.load(std::memory_order_relaxed);
+	Result.LastNumChannels = LastNumChannels.load(std::memory_order_relaxed);
+	Result.LastSampleRate = LastSampleRate.load(std::memory_order_relaxed);
+	Result.bCaptureRegistered = bCaptureRegistered;
+	Result.bStreamerAttached = Streamer.IsValid();
 	return Result;
+}
+
+void FWwisePixelStreaming2Bridge::LogStatus() const
+{
+	const FWwisePixelStreaming2Stats Stats = GetStats();
+	const IConsoleVariable* DisableTransmitAudio = IConsoleManager::Get().FindConsoleVariable(TEXT("PixelStreaming2.WebRTC.DisableTransmitAudio"));
+	const IConsoleVariable* WebRTCAudioGain = IConsoleManager::Get().FindConsoleVariable(TEXT("PixelStreaming2.WebRTC.AudioGain"));
+	const int32 bTransmitDisabled = DisableTransmitAudio != nullptr ? DisableTransmitAudio->GetInt() : -1;
+	const float PixelStreamingGain = WebRTCAudioGain != nullptr ? WebRTCAudioGain->GetFloat() : -1.0f;
+	const FString TargetId = Config.StreamerId.IsEmpty() && IPixelStreaming2Module::IsAvailable()
+		? IPixelStreaming2Module::Get().GetDefaultStreamerID()
+		: Config.StreamerId;
+
+	UE_LOG(LogWwisePixelStreaming2, Display,
+		TEXT("Status: CaptureRegistered=%s StreamerAttached=%s StreamerId='%s' OutputDeviceId=%llu "
+			"Captured=%llu Pushed=%llu Dropped=%llu Rejected=%llu NonSilent=%llu "
+			"LastPeak=%.6f MaxPeak=%.6f Format=%d frames x %d channels @ %d Hz "
+			"Gain=%.3f PS2DisableTransmitAudio=%d PS2AudioGain=%.3f"),
+		Stats.bCaptureRegistered ? TEXT("true") : TEXT("false"),
+		Stats.bStreamerAttached ? TEXT("true") : TEXT("false"),
+		*TargetId,
+		Config.OutputDeviceId,
+		Stats.CapturedBuffers,
+		Stats.PushedBuffers,
+		Stats.DroppedBuffers,
+		Stats.RejectedBuffers,
+		Stats.NonSilentBuffers,
+		Stats.LastPeak,
+		Stats.MaxPeak,
+		Stats.LastNumFrames,
+		Stats.LastNumChannels,
+		Stats.LastSampleRate,
+		Config.Gain,
+		bTransmitDisabled,
+		PixelStreamingGain);
 }
 
 uint32 FWwisePixelStreaming2Bridge::Run()
@@ -163,6 +209,24 @@ uint32 FWwisePixelStreaming2Bridge::Run()
 				ApplyGain(GainScratch.GetData(), NumSamples);
 				DataToPush = GainScratch.GetData();
 			}
+
+			float Peak = 0.0f;
+			for (int32 Index = 0; Index < NumSamples; ++Index)
+			{
+				Peak = FMath::Max(Peak, FMath::Abs(DataToPush[Index]));
+			}
+			LastPeak.store(Peak, std::memory_order_relaxed);
+			float PreviousMax = MaxPeak.load(std::memory_order_relaxed);
+			while (Peak > PreviousMax && !MaxPeak.compare_exchange_weak(PreviousMax, Peak, std::memory_order_relaxed))
+			{
+			}
+			if (Peak > UE_SMALL_NUMBER)
+			{
+				NonSilentBuffers.fetch_add(1, std::memory_order_relaxed);
+			}
+			LastNumFrames.store(Frame.NumFrames, std::memory_order_relaxed);
+			LastNumChannels.store(Frame.NumChannels, std::memory_order_relaxed);
+			LastSampleRate.store(Frame.SampleRate, std::memory_order_relaxed);
 
 			Producer->PushAudio(DataToPush, NumSamples, Frame.NumChannels, Frame.SampleRate);
 			PushedBuffers.fetch_add(1, std::memory_order_relaxed);
@@ -226,6 +290,11 @@ bool FWwisePixelStreaming2Bridge::TryRegisterWwiseCapture()
 	}
 	if (!FAkAudioDevice::IsInitialized())
 	{
+		if (!bLoggedWaitingForWwise)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Waiting for the Wwise SoundEngine to initialize."));
+			bLoggedWaitingForWwise = true;
+		}
 		return false;
 	}
 
@@ -244,13 +313,26 @@ bool FWwisePixelStreaming2Bridge::TryRegisterWwiseCapture()
 	const AKRESULT Result = WwiseDevice->RegisterCaptureCallback(&CaptureCallback, RegisteredOutputId, this);
 	if (Result != AK_Success)
 	{
+		if (LastCaptureRegistrationError != static_cast<int32>(Result))
+		{
+			UE_LOG(LogWwisePixelStreaming2, Error,
+				TEXT("RegisterCaptureCallback failed for OutputDeviceId=%llu (AKRESULT %d)."),
+				Config.OutputDeviceId,
+				static_cast<int32>(Result));
+			LastCaptureRegistrationError = static_cast<int32>(Result);
+		}
 		WwiseDevice = nullptr;
 		return false;
 	}
 
 	bAcceptCallbacks.store(true, std::memory_order_release);
 	bCaptureRegistered = true;
-	UE_LOG(LogWwisePixelStreaming2, Log, TEXT("Capturing Wwise output at %d Hz."), SampleRate);
+	bLoggedWaitingForWwise = false;
+	LastCaptureRegistrationError = INDEX_NONE;
+	UE_LOG(LogWwisePixelStreaming2, Display,
+		TEXT("Registered Wwise capture callback for OutputDeviceId=%llu at %d Hz."),
+		Config.OutputDeviceId,
+		SampleRate);
 	return true;
 }
 
@@ -258,25 +340,42 @@ bool FWwisePixelStreaming2Bridge::TryAttachStreamer()
 {
 	if (!IPixelStreaming2Module::IsAvailable())
 	{
+		if (!bLoggedWaitingForPixelStreaming)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Waiting for the PixelStreaming2 module."));
+			bLoggedWaitingForPixelStreaming = true;
+		}
 		return false;
 	}
 
 	IPixelStreaming2Module& Module = IPixelStreaming2Module::Get();
 	if (!Module.IsReady())
 	{
+		if (!bLoggedWaitingForPixelStreaming)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Waiting for PixelStreaming2 to become ready."));
+			bLoggedWaitingForPixelStreaming = true;
+		}
 		return false;
 	}
+	bLoggedWaitingForPixelStreaming = false;
 
 	const FString TargetId = Config.StreamerId.IsEmpty() ? Module.GetDefaultStreamerID() : Config.StreamerId;
 	TSharedPtr<IPixelStreaming2Streamer> TargetStreamer = Module.FindStreamer(TargetId);
 	if (!TargetStreamer)
 	{
+		if (!bLoggedWaitingForStreamer)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Waiting for Pixel Streaming 2 streamer '%s'."), *TargetId);
+			bLoggedWaitingForStreamer = true;
+		}
 		return false;
 	}
 
 	TargetStreamer->AddAudioProducer(Producer);
 	Streamer = TargetStreamer;
-	UE_LOG(LogWwisePixelStreaming2, Log, TEXT("Attached Wwise audio producer to Pixel Streaming 2 streamer '%s'."), *TargetId);
+	bLoggedWaitingForStreamer = false;
+	UE_LOG(LogWwisePixelStreaming2, Display, TEXT("Attached Wwise audio producer to Pixel Streaming 2 streamer '%s'."), *TargetId);
 	return true;
 }
 

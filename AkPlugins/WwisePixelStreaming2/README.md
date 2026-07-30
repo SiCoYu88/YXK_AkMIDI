@@ -23,6 +23,7 @@ QueueSlots=8
 MaxFrames=2048
 MaxChannels=16
 Gain=1.0
+StatusLogIntervalSeconds=5.0
 ```
 
 - `StreamerId` 为空时使用 Pixel Streaming 2 默认 Streamer。
@@ -30,16 +31,27 @@ Gain=1.0
 - 队列满时丢弃最新缓冲区，绝不阻塞 Wwise 实时音频线程。
 - `MaxFrames` 或 `MaxChannels` 小于实际 Wwise 输出时，对应缓冲区会被拒绝。
 - `Gain` 在发送线程应用，范围为 0 到 8。
+- `StatusLogIntervalSeconds` 控制状态日志间隔，设为 0 可关闭周期日志。
 
 ## 运行验证
 
 启动时日志应依次出现：
 
 ```text
-Capturing Wwise output at 48000 Hz.
+Registered Wwise capture callback for OutputDeviceId=0 at 48000 Hz.
 Attached Wwise audio producer to Pixel Streaming 2 streamer 'DefaultStreamer'.
 ```
 
 仅播放 Wwise Event 时，浏览器应能听到对应音频。若项目已通过 Wwise AudioLink 将同一输出送入 UE Audio Mixer，请关闭其中一条路径，否则会出现重复音频或梳状滤波。
 
 关闭时日志会输出 Captured、Pushed、Dropped、Rejected 计数，可用于判断队列容量和输入格式是否合适。
+
+运行时可执行 `WwisePixelStreaming2.Status` 立即输出状态。判断静音位置：
+
+- `CaptureRegistered=false`：Wwise 没有初始化或 Capture Callback 注册失败。
+- `Captured=0`：Wwise 回调没有触发，通常是输出设备 ID 不正确。
+- `Captured>0` 且 `NonSilent=0`：所捕获的 Wwise 输出本身是静音，应检查 Bus 路由或 Secondary Output。
+- `NonSilent>0`、`Pushed>0` 但浏览器仍静音：检查 `StreamerAttached`、`PS2DisableTransmitAudio` 和 `PS2AudioGain`。
+- `Rejected>0`：实际帧数或声道数超过 `MaxFrames`/`MaxChannels`。
+
+可将 `PixelStreaming2.DumpDebugAudio` 设为 `1`，播放一段声音后设回 `0`，让 Pixel Streaming 2 写出混音 WAV，以区分服务端混音与浏览器播放问题。

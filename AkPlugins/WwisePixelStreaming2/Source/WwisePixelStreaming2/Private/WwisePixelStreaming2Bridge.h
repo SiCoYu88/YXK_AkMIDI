@@ -26,6 +26,7 @@ struct FWwisePixelStreaming2Config
 	int32 MaxFrames = 2048;
 	int32 MaxChannels = 16;
 	float Gain = 1.0f;
+	float StatusLogIntervalSeconds = 5.0f;
 
 	static FWwisePixelStreaming2Config Load();
 };
@@ -40,6 +41,8 @@ public:
 	void StopBridge();
 	void TryInitialize();
 	FWwisePixelStreaming2Stats GetStats() const;
+	void LogStatus() const;
+	float GetStatusLogIntervalSeconds() const { return Config.StatusLogIntervalSeconds; }
 
 	virtual uint32 Run() override;
 	virtual void Stop() override;
@@ -70,5 +73,15 @@ private:
 	std::atomic<uint64> PushedBuffers { 0 };
 	std::atomic<uint64> DroppedBuffers { 0 };
 	std::atomic<uint64> RejectedBuffers { 0 };
+	std::atomic<uint64> NonSilentBuffers { 0 };
+	std::atomic<float> LastPeak { 0.0f };
+	std::atomic<float> MaxPeak { 0.0f };
+	std::atomic<int32> LastNumFrames { 0 };
+	std::atomic<int32> LastNumChannels { 0 };
+	std::atomic<int32> LastSampleRate { 0 };
 	bool bCaptureRegistered = false;
+	bool bLoggedWaitingForWwise = false;
+	bool bLoggedWaitingForPixelStreaming = false;
+	bool bLoggedWaitingForStreamer = false;
+	int32 LastCaptureRegistrationError = INDEX_NONE;
 };
