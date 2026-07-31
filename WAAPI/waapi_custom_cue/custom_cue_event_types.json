@@ -1,0 +1,12 @@
+{
+  "event_types": [
+    {
+      "event_type": "唱片音符",
+      "custom_cue_name": "Note_"
+    },
+	{
+      "event_type": "测试事件类型（勿选）",
+      "custom_cue_name": "Test_"
+    }
+  ]
+}

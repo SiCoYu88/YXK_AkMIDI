@@ -1,0 +1,2 @@
+waapi-client>=0.7,<1
+PySide6>=6.7,<7
