@@ -21,8 +21,8 @@ void* FAkAudioSamplerModule::AudioBusHackerDllHandle = nullptr;
 void FAkAudioSamplerModule::StartupModule()
 {
 #if PLATFORM_WINDOWS
-	const TSharedPtr<IPlugin> WwisePlugin = IPluginManager::Get().FindPlugin(TEXT("Wwise"));
-	if (!WwisePlugin.IsValid())
+	const TSharedPtr<IPlugin> WwiseSoundEnginePlugin = IPluginManager::Get().FindPlugin(TEXT("WwiseSoundEngine"));
+	if (!WwiseSoundEnginePlugin.IsValid())
 	{
 		UE_LOG(LogAkAudioSampler, Error, TEXT("Unable to locate the Wwise plugin."));
 		return;
@@ -47,7 +47,7 @@ void FAkAudioSamplerModule::StartupModule()
 	for (const TCHAR* Configuration : Configurations)
 	{
 		const FString DllPath = FPaths::Combine(
-			WwisePlugin->GetBaseDir(),
+			WwiseSoundEnginePlugin->GetBaseDir(),
 			TEXT("ThirdParty"),
 			TEXT("x64_vc170"),
 			Configuration,
