@@ -6,6 +6,7 @@
 #include "HAL/PlatformProcess.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
 
 IMPLEMENT_MODULE(FAkAudioSamplerModule, AkAudioSampler)
 
@@ -17,6 +18,10 @@ AK_STATIC_LINK_PLUGIN(AudioBusHackerFX);
 
 FSetAudioBusHackerVisualizationCallback FAkAudioSamplerModule::SetVisualizationCallbackFunc = nullptr;
 void* FAkAudioSamplerModule::AudioBusHackerDllHandle = nullptr;
+FCriticalSection FAkAudioSamplerModule::VisualizationCallbackMutex;
+AkAudioBusHackerVisualizationCallbackFunc FAkAudioSamplerModule::RegisteredVisualizationCallback = nullptr;
+int32 FAkAudioSamplerModule::VisualizationConsumerCount = 0;
+int32 FAkAudioSamplerModule::LastVisualizationCallbackResult = 1;
 
 void FAkAudioSamplerModule::StartupModule()
 {
@@ -24,7 +29,7 @@ void FAkAudioSamplerModule::StartupModule()
 	const TSharedPtr<IPlugin> WwiseSoundEnginePlugin = IPluginManager::Get().FindPlugin(TEXT("WwiseSoundEngine"));
 	if (!WwiseSoundEnginePlugin.IsValid())
 	{
-		UE_LOG(LogAkAudioSampler, Error, TEXT("Unable to locate the Wwise plugin."));
+		UE_LOG(LogAkAudioSampler, Error, TEXT("Unable to locate the WwiseSoundEngine plugin."));
 		return;
 	}
 
@@ -86,16 +91,22 @@ void FAkAudioSamplerModule::StartupModule()
 		UE_LOG(
 			LogAkAudioSampler,
 			Error,
-			TEXT("AudioBusHacker.dll with the visualization API was not found in Wwise/ThirdParty."));
+			TEXT("AudioBusHacker.dll with the visualization API was not found in WwiseSoundEngine/ThirdParty."));
 	}
 #endif
 }
 
 void FAkAudioSamplerModule::ShutdownModule()
 {
-	if (IsVisualizationCallbackAvailable())
 	{
-		SetVisualizationCallback(nullptr);
+		FScopeLock Lock(&VisualizationCallbackMutex);
+		if (IsVisualizationCallbackAvailable())
+		{
+			SetVisualizationCallback(nullptr);
+		}
+		RegisteredVisualizationCallback = nullptr;
+		VisualizationConsumerCount = 0;
+		LastVisualizationCallbackResult = 1;
 	}
 	SetVisualizationCallbackFunc = nullptr;
 
@@ -127,4 +138,64 @@ bool FAkAudioSamplerModule::IsVisualizationCallbackAvailable()
 #else
 	return false;
 #endif
+}
+
+bool FAkAudioSamplerModule::AcquireVisualizationCallback(
+	AkAudioBusHackerVisualizationCallbackFunc InCallback,
+	int32* OutResult)
+{
+	FScopeLock Lock(&VisualizationCallbackMutex);
+
+	if (!InCallback || !IsVisualizationCallbackAvailable())
+	{
+		if (OutResult)
+		{
+			*OutResult = 1;
+		}
+		return false;
+	}
+
+	if (VisualizationConsumerCount == 0)
+	{
+		LastVisualizationCallbackResult = SetVisualizationCallback(InCallback);
+		RegisteredVisualizationCallback = InCallback;
+	}
+	else if (RegisteredVisualizationCallback != InCallback)
+	{
+		UE_LOG(
+			LogAkAudioSampler,
+			Error,
+			TEXT("AudioBusHacker supports only one visualization callback per process."));
+		if (OutResult)
+		{
+			*OutResult = 1;
+		}
+		return false;
+	}
+
+	++VisualizationConsumerCount;
+	if (OutResult)
+	{
+		*OutResult = LastVisualizationCallbackResult;
+	}
+	return true;
+}
+
+int32 FAkAudioSamplerModule::ReleaseVisualizationCallback()
+{
+	FScopeLock Lock(&VisualizationCallbackMutex);
+
+	if (VisualizationConsumerCount <= 0)
+	{
+		return 1;
+	}
+
+	--VisualizationConsumerCount;
+	if (VisualizationConsumerCount == 0)
+	{
+		LastVisualizationCallbackResult = SetVisualizationCallback(nullptr);
+		RegisteredVisualizationCallback = nullptr;
+	}
+
+	return LastVisualizationCallbackResult;
 }

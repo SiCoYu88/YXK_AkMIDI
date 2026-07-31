@@ -195,12 +195,16 @@ UAkAudioSampler::UAkAudioSampler(const FObjectInitializer& ObjectInitializer)
 
 int32 UAkAudioSampler::RegisterCatchBuffer()
 {
-	return FAkAudioSamplerModule::SetVisualizationCallback(&UAkAudioSampler::VisualizationCallback);
+	int32 Result = 1;
+	FAkAudioSamplerModule::AcquireVisualizationCallback(
+		&UAkAudioSampler::VisualizationCallback,
+		&Result);
+	return Result;
 }
 
 int32 UAkAudioSampler::UnregisterCatchBuffer()
 {
-	return FAkAudioSamplerModule::SetVisualizationCallback(nullptr);
+	return FAkAudioSamplerModule::ReleaseVisualizationCallback();
 }
 
 bool UAkAudioSampler::IsVisualizationAvailable()

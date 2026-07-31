@@ -27,8 +27,12 @@ public class AkAudioSampler : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-                "Core",
-                "AkAudio",
+				"Core",
+				"AkAudio",
+				"Niagara",
+				"NiagaraCore",
+				"RenderCore",
+				"RHI",
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -42,7 +46,8 @@ public class AkAudioSampler : ModuleRules
 				"Slate",
 				"SlateCore",
 				"Projects",
-                "WwiseSoundEngine"
+				"VectorVM",
+				"WwiseSoundEngine"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

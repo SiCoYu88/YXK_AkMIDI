@@ -33,8 +33,16 @@ public:
 
 	static int32 SetVisualizationCallback(AkAudioBusHackerVisualizationCallbackFunc InCallback);
 	static bool IsVisualizationCallbackAvailable();
+	static bool AcquireVisualizationCallback(
+		AkAudioBusHackerVisualizationCallbackFunc InCallback,
+		int32* OutResult = nullptr);
+	static int32 ReleaseVisualizationCallback();
 
 private:
 	static FSetAudioBusHackerVisualizationCallback SetVisualizationCallbackFunc;
 	static void* AudioBusHackerDllHandle;
+	static FCriticalSection VisualizationCallbackMutex;
+	static AkAudioBusHackerVisualizationCallbackFunc RegisteredVisualizationCallback;
+	static int32 VisualizationConsumerCount;
+	static int32 LastVisualizationCallbackResult;
 };
