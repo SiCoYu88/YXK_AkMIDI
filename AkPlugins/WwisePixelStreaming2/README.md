@@ -8,6 +8,8 @@
 2. 确保项目已安装 Wwise 2025.1 集成，并启用 `Wwise`、`PixelStreaming2` 和 `WwisePixelStreaming2` 插件。
 3. 重新生成项目文件并编译。
 
+插件描述已设置为默认启用。仍建议确认项目的 `.uproject` 中没有将它显式禁用；成功加载后，启动日志的插件挂载列表中应包含 `WwisePixelStreaming2`。C++ 插件必须随项目重新编译和打包，仅复制到已经生成的运行包中不会生效。
+
 插件默认启用桥接，并自动绑定 Pixel Streaming 2 的默认 Streamer。Wwise 主输出仍会正常播放。
 
 ## 配置

@@ -6,7 +6,7 @@
 	"Description": "Routes the Wwise output mix into Pixel Streaming 2.",
 	"Category": "Audio",
 	"CreatedBy": "YXK",
-	"EnabledByDefault": false,
+	"EnabledByDefault": true,
 	"CanContainContent": false,
 	"Modules": [
 		{
