@@ -64,7 +64,7 @@ Wwise 中选择 MusicSegment、MusicTrack 或其下音频对象时，工具会�
 
 `event_type` 是下拉框显示的事件类型，`custom_cue_name` 是生成 Cue 的名称前缀。以上示例会生成 `Example_0、Example_1、Example_2…`。两项在配置文件中都必须唯一，点击界面“刷新”会重新载入配置。
 
-勾选“循环”后，工具会在 MusicSegment 最晚 MusicClip/MIDI Clip 的内容结束位置添加名为 `Loop` 的 Custom Cue，并将 End Cursor 和 Exit Cue 都设置为 `Loop + 100 ms`。工具会重新读取并验证两者；验证失败则回滚。`Loop` 独立于事件类型，已有同名 User Cue 会自动替换。
+勾选“循环”后，工具会在 MusicSegment 最晚 MusicClip/MIDI Clip 的内容结束位置前 10 ms 添加名为 `Loop` 的 Custom Cue，并将 End Cursor 和 Exit Cue 都设置为 `Loop + 100 ms`。工具会重新读取并验证两者；验证失败则回滚。`Loop` 独立于事件类型，已有同名 User Cue 会自动替换。
 
 ## 命令行使用
 
@@ -102,6 +102,6 @@ python .\Tools\WwiseWAAPI\add_music_segment_custom_cues.py --help
 - `--tempo 150`：覆盖 Wwise 中读取到的 BPM。
 - `--end-ms 12800`：覆盖 Music Segment 的结束位置。
 - `--include-end`：当时间恰好落在结尾时也创建 Cue。
-- `--loop`：在 MusicSegment 内容末尾添加或更新 `Loop` Cue，并保证 End Cursor/Exit Cue 晚 100 ms。
+- `--loop`：在 MusicSegment 内容末尾前 10 ms 添加或更新 `Loop` Cue，并保证 End Cursor/Exit Cue 比 Loop 晚 100 ms。
 - `--replace-existing`：替换同前缀的已有 Custom Cue。
 - `--waapi-url`：连接非默认 WAAPI 端口。

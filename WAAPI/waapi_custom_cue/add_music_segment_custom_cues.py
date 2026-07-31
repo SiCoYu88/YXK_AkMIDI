@@ -26,6 +26,7 @@ WAAPI_UNDO_END = "ak.wwise.core.undo.endGroup"
 CUSTOM_CUE_TYPE = 2
 DEFAULT_WAAPI_URL = "ws://127.0.0.1:8080/waapi"
 LOOP_CUE_NAME = "Loop"
+LOOP_CUE_LEAD_MS = Decimal("10")
 LOOP_CUE_OFFSET_MS = Decimal("100")
 GUID_PATTERN = re.compile(
     r"^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -418,6 +419,16 @@ def get_segment_content_end_ms(client: Any, segment: SegmentInfo) -> Decimal | N
     return max(content_ends) if content_ends else None
 
 
+def calculate_loop_positions(content_end_ms: Decimal) -> tuple[Decimal, Decimal]:
+    if content_end_ms < LOOP_CUE_LEAD_MS:
+        raise ToolError(
+            f"Music Segment content end must be at least {LOOP_CUE_LEAD_MS} ms "
+            "to create the Loop cue."
+        )
+    loop_time_ms = content_end_ms - LOOP_CUE_LEAD_MS
+    return loop_time_ms, loop_time_ms + LOOP_CUE_OFFSET_MS
+
+
 def chunks(values: Sequence[CueSpec], size: int) -> Iterable[Sequence[CueSpec]]:
     for start in range(0, len(values), size):
         yield values[start : start + size]
@@ -481,13 +492,15 @@ def prepare_generation(
         content_end_ms = get_segment_content_end_ms(client, segment)
         if content_end_ms is None:
             if existing_loop_cues:
-                content_end_ms = Decimal(str(existing_loop_cues[0].get("@TimeMs", 0)))
+                content_end_ms = (
+                    Decimal(str(existing_loop_cues[0].get("@TimeMs", 0)))
+                    + LOOP_CUE_LEAD_MS
+                )
             else:
                 content_end_ms = Decimal(str(segment.end_ms))
-        if content_end_ms < 0:
-            raise ToolError("Music Segment content end cannot be negative.")
-        loop_spec = CueSpec(LOOP_CUE_NAME, float(content_end_ms), -1)
-        target_end_ms = float(content_end_ms + LOOP_CUE_OFFSET_MS)
+        loop_time_ms, end_cursor_ms = calculate_loop_positions(content_end_ms)
+        loop_spec = CueSpec(LOOP_CUE_NAME, float(loop_time_ms), -1)
+        target_end_ms = float(end_cursor_ms)
 
     end_ms = (
         end_ms_override

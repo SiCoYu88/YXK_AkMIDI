@@ -449,7 +449,7 @@ class CustomCueWindow(QMainWindow):
 
         self.include_end_check = QCheckBox("在结尾恰好命中时也添加 Cue")
         self.replace_check = QCheckBox("替换相同前缀的已有 Custom Cue")
-        self.loop_check = QCheckBox("循环（Loop 位于内容末尾，End/Exit 延后 100 ms）")
+        self.loop_check = QCheckBox("循环（Loop 位于内容末尾前 10 ms，End/Exit 延后 100 ms）")
         self.save_check = QCheckBox("执行后保存 Wwise 工程")
         self.replace_check.setChecked(True)
         self.loop_check.setChecked(True)

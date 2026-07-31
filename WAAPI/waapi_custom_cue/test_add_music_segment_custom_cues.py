@@ -19,6 +19,7 @@ from add_music_segment_custom_cues import (
     WAAPI_UNDO_CANCEL,
     WAAPI_UNDO_END,
     build_parser,
+    calculate_loop_positions,
     create_cues,
     execute_generation,
     get_music_cues,
@@ -89,8 +90,8 @@ class PreviewSpecsTests(unittest.TestCase):
             specs=(),
             matching_cues=(),
             conflicting_cues=(),
-            loop_spec=CueSpec(LOOP_CUE_NAME, 1000.0, -1),
-            target_end_ms=1100.0,
+            loop_spec=CueSpec(LOOP_CUE_NAME, 990.0, -1),
+            target_end_ms=1090.0,
             exit_cues=(
                 {"id": "{EXIT}", "name": "Exit Cue", "@CueType": 1, "@TimeMs": 1000},
             ),
@@ -99,7 +100,7 @@ class PreviewSpecsTests(unittest.TestCase):
         preview = build_preview_specs(plan)
 
         self.assertEqual(
-            [(LOOP_CUE_NAME, 1000.0), ("End Cursor", 1100.0), ("Exit Cue", 1100.0)],
+            [(LOOP_CUE_NAME, 990.0), ("End Cursor", 1090.0), ("Exit Cue", 1090.0)],
             [(spec.name, spec.time_ms) for spec in preview],
         )
 
@@ -142,6 +143,16 @@ class SegmentFilterTests(unittest.TestCase):
 
 
 class MakeCueSpecsTests(unittest.TestCase):
+    def test_loop_positions_are_ten_ms_before_content_end(self) -> None:
+        loop_time_ms, end_cursor_ms = calculate_loop_positions(Decimal("12800"))
+
+        self.assertEqual(Decimal("12790"), loop_time_ms)
+        self.assertEqual(Decimal("12890"), end_cursor_ms)
+
+    def test_loop_position_rejects_content_shorter_than_ten_ms(self) -> None:
+        with self.assertRaisesRegex(ToolError, "at least 10 ms"):
+            calculate_loop_positions(Decimal("9.999"))
+
     def test_half_beat_at_150_bpm_matches_sample_segment(self) -> None:
         specs = make_cue_specs(
             tempo=Decimal("150"),
@@ -449,9 +460,9 @@ class WaapiIntegrationStructureTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(plan.loop_spec)
-        self.assertEqual(1000.0, plan.loop_spec.time_ms)
-        self.assertEqual(1100.0, plan.target_end_ms)
-        self.assertEqual(Decimal("1000.0"), plan.end_ms)
+        self.assertEqual(990.0, plan.loop_spec.time_ms)
+        self.assertEqual(1090.0, plan.target_end_ms)
+        self.assertEqual(Decimal("990.0"), plan.end_ms)
         self.assertEqual(("{LOOP}",), tuple(cue["id"] for cue in plan.existing_loop_cues))
         self.assertEqual((), plan.matching_cues)
 

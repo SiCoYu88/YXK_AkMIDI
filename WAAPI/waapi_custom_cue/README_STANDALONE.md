@@ -184,10 +184,10 @@ Note_2
 
 默认选中。
 
-选中后，工具会在 MusicSegment 内最晚 MusicClip/MIDI Clip 的内容结束位置添加一个名为 `Loop` 的 Custom Cue，并把 End Cursor 设置到 Loop 后 100 ms。
+选中后，工具会在 MusicSegment 内最晚 MusicClip/MIDI Clip 的内容结束位置前 10 ms 添加一个名为 `Loop` 的 Custom Cue，并把 End Cursor 和 Exit Cue 设置到 Loop 后 100 ms。
 
 ```text
-Loop 时间 = MusicSegment 内容结束时间
+Loop 时间 = MusicSegment 内容结束时间 - 10 ms
 End Cursor = Loop 时间 + 100 ms
 Exit Cue = Loop 时间 + 100 ms
 ```
@@ -274,9 +274,9 @@ Note_1   200 ms
 Note_2   400 ms
 ...
 Note_63  12600 ms
-Loop     12800 ms
-EndCursor 12900 ms
-Exit Cue  12900 ms
+Loop     12790 ms
+EndCursor 12890 ms
+Exit Cue  12890 ms
 ```
 
 普通事件 Cue 默认只生成到 Loop 之前，不会生成在 12800 ms 的 Loop 位置。End Cursor 与 Exit Cue 比 Loop 晚 100 ms。
