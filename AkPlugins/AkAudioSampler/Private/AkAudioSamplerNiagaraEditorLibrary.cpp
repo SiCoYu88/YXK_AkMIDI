@@ -18,6 +18,7 @@
 #include "NiagaraStackFunctionInputBinder.h"
 #include "NiagaraTypes.h"
 #include "UObject/UObjectIterator.h"
+#include "ViewModels/Stack/NiagaraStackGraphUtilities.h"
 
 namespace AkAudioSamplerNiagaraEditor
 {
@@ -457,6 +458,207 @@ bool UAkAudioSamplerNiagaraEditorLibrary::SetParticleUpdateModuleVector2Input(
 		TEXT("Updated %d '%s' module input(s)."),
 		UpdatedModuleCount,
 		*ModuleScriptName.ToString());
+	return true;
+#else
+	OutMessage = TEXT("This function is only available in editor builds.");
+	return false;
+#endif
+}
+
+bool UAkAudioSamplerNiagaraEditorLibrary::SetParticleUpdateModuleEnabled(
+	UNiagaraSystem* System,
+	FName ModuleScriptName,
+	bool bEnabled,
+	FString& OutMessage)
+{
+#if WITH_EDITOR
+	using namespace AkAudioSamplerNiagaraEditor;
+
+	if (System == nullptr)
+	{
+		OutMessage = TEXT("Niagara system is null.");
+		return false;
+	}
+
+	int32 UpdatedModuleCount = 0;
+	for (TObjectIterator<UNiagaraNodeOutput> It; It; ++It)
+	{
+		UNiagaraNodeOutput* OutputNode = *It;
+		if (OutputNode->GetOutermost() != System->GetOutermost() ||
+			OutputNode->GetUsage() != ENiagaraScriptUsage::ParticleUpdateScript)
+		{
+			continue;
+		}
+
+		TArray<UNiagaraNodeFunctionCall*> ModuleNodes;
+		GetOrderedModuleNodes(*OutputNode, ModuleNodes);
+		for (UNiagaraNodeFunctionCall* ModuleNode : ModuleNodes)
+		{
+			if (ModuleNode != nullptr && ModuleNode->FunctionScript != nullptr &&
+				ModuleNode->FunctionScript->GetFName() == ModuleScriptName)
+			{
+				FNiagaraStackGraphUtilities::SetModuleIsEnabled(*ModuleNode, bEnabled);
+				++UpdatedModuleCount;
+			}
+		}
+	}
+
+	if (UpdatedModuleCount == 0)
+	{
+		OutMessage = FString::Printf(
+			TEXT("Particle Update module '%s' was not found."),
+			*ModuleScriptName.ToString());
+		return false;
+	}
+
+	System->Modify();
+	System->RequestCompile(true);
+	OutMessage = FString::Printf(
+		TEXT("Set %d '%s' module(s) enabled=%s."),
+		UpdatedModuleCount,
+		*ModuleScriptName.ToString(),
+		bEnabled ? TEXT("true") : TEXT("false"));
+	return true;
+#else
+	OutMessage = TEXT("This function is only available in editor builds.");
+	return false;
+#endif
+}
+
+bool UAkAudioSamplerNiagaraEditorLibrary::SetParticleUpdateFunctionFloatInputLinkedParameter(
+	UNiagaraSystem* System,
+	FName FunctionScriptName,
+	FName InputName,
+	FName LinkedParameterName,
+	FString& OutMessage)
+{
+#if WITH_EDITOR
+	if (System == nullptr)
+	{
+		OutMessage = TEXT("Niagara system is null.");
+		return false;
+	}
+
+	int32 UpdatedFunctionCount = 0;
+	for (const FNiagaraEmitterHandle& EmitterHandle : System->GetEmitterHandles())
+	{
+		const FVersionedNiagaraEmitter VersionedEmitter = EmitterHandle.GetInstance();
+		FVersionedNiagaraEmitterData* EmitterData = VersionedEmitter.GetEmitterData();
+		if (EmitterData == nullptr || EmitterData->UpdateScriptProps.Script == nullptr)
+		{
+			continue;
+		}
+
+		UNiagaraScriptSource* ScriptSource = Cast<UNiagaraScriptSource>(EmitterData->GraphSource);
+		if (ScriptSource == nullptr || ScriptSource->NodeGraph == nullptr)
+		{
+			continue;
+		}
+
+		TArray<UNiagaraNodeFunctionCall*> FunctionNodes;
+		ScriptSource->NodeGraph->GetNodesOfClass(FunctionNodes);
+		for (UNiagaraNodeFunctionCall* FunctionNode : FunctionNodes)
+		{
+			if (FunctionNode == nullptr || FunctionNode->FunctionScript == nullptr ||
+				FunctionNode->FunctionScript->GetFName() != FunctionScriptName)
+			{
+				continue;
+			}
+
+			UEdGraphPin* FunctionMapInput = AkAudioSamplerNiagaraEditor::GetParameterMapInputPin(*FunctionNode);
+			if (FunctionMapInput == nullptr || FunctionMapInput->LinkedTo.Num() != 1)
+			{
+				continue;
+			}
+
+			UNiagaraNode* OverrideNode = Cast<UNiagaraNode>(
+				FunctionMapInput->LinkedTo[0]->GetOwningNode());
+			if (OverrideNode == nullptr ||
+				OverrideNode->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapSet"))
+			{
+				continue;
+			}
+
+			const FName AliasedInputName(
+				*(FunctionNode->GetFunctionName() + TEXT(".") + InputName.ToString()));
+			TArray<UEdGraphPin*> OverrideInputPins;
+			OverrideNode->GetInputPins(OverrideInputPins);
+			UEdGraphPin** OverridePinPtr = OverrideInputPins.FindByPredicate(
+				[AliasedInputName](const UEdGraphPin* Pin)
+				{
+					return Pin != nullptr && Pin->PinName == AliasedInputName;
+				});
+			if (OverridePinPtr == nullptr)
+			{
+				continue;
+			}
+
+			UEdGraphPin* OverridePin = *OverridePinPtr;
+			if (OverridePin->LinkedTo.Num() != 1)
+			{
+				OutMessage = FString::Printf(
+					TEXT("Input '%s' does not have exactly one linked value."),
+					*AliasedInputName.ToString());
+				return false;
+			}
+
+			UEdGraphNode* PreviousValueNode = OverridePin->LinkedTo[0]->GetOwningNode();
+			if (PreviousValueNode == nullptr ||
+				PreviousValueNode->GetClass()->GetFName() != TEXT("NiagaraNodeParameterMapGet"))
+			{
+				OutMessage = FString::Printf(
+					TEXT("Input '%s' is not currently a linked parameter."),
+					*AliasedInputName.ToString());
+				return false;
+			}
+
+			UNiagaraGraph* Graph = FunctionNode->GetNiagaraGraph();
+			if (Graph == nullptr)
+			{
+				continue;
+			}
+
+			Graph->Modify();
+			OverrideNode->Modify();
+			FunctionNode->Modify();
+			Graph->RemoveNode(PreviousValueNode);
+			if (OverridePin->LinkedTo.Num() != 0)
+			{
+				OutMessage = FString::Printf(
+					TEXT("Failed to clear the previous value for input '%s'."),
+					*AliasedInputName.ToString());
+				return false;
+			}
+
+			const TSet<FNiagaraVariableBase> KnownParameters;
+			const FNiagaraVariableBase LinkedParameter(
+				FNiagaraTypeDefinition::GetFloatDef(),
+				LinkedParameterName);
+			FNiagaraStackGraphUtilities::SetLinkedParameterValueForFunctionInput(
+				*OverridePin,
+				LinkedParameter,
+				KnownParameters);
+			++UpdatedFunctionCount;
+		}
+	}
+
+	if (UpdatedFunctionCount == 0)
+	{
+		OutMessage = FString::Printf(
+			TEXT("Function '%s' input '%s' was not found."),
+			*FunctionScriptName.ToString(),
+			*InputName.ToString());
+		return false;
+	}
+
+	System->Modify();
+	System->RequestCompile(true);
+	OutMessage = FString::Printf(
+		TEXT("Linked %d '%s.%s' input(s) to '%s'."),
+		UpdatedFunctionCount,
+		*FunctionScriptName.ToString(),
+		*InputName.ToString(),
+		*LinkedParameterName.ToString());
 	return true;
 #else
 	OutMessage = TEXT("This function is only available in editor builds.");

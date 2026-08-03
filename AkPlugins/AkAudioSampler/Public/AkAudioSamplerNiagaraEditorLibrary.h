@@ -32,4 +32,21 @@ public:
 		FName InputName,
 		FVector2D Value,
 		FString& OutMessage);
+
+	/** Enables or disables every matching module in a Particle Update stack. */
+	UFUNCTION(BlueprintCallable, Category = "AkAudioSampler|Niagara")
+	static bool SetParticleUpdateModuleEnabled(
+		UNiagaraSystem* System,
+		FName ModuleScriptName,
+		bool bEnabled,
+		FString& OutMessage);
+
+	/** Replaces a linked float input on a Particle Update function or dynamic input. */
+	UFUNCTION(BlueprintCallable, Category = "AkAudioSampler|Niagara")
+	static bool SetParticleUpdateFunctionFloatInputLinkedParameter(
+		UNiagaraSystem* System,
+		FName FunctionScriptName,
+		FName InputName,
+		FName LinkedParameterName,
+		FString& OutMessage);
 };
