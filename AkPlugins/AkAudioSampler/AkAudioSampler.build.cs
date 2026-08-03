@@ -51,6 +51,17 @@ public class AkAudioSampler : ModuleRules
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"NiagaraEditor",
+					"UnrealEd"
+				}
+				);
+		}
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(

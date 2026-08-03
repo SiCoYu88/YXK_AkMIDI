@@ -96,3 +96,6 @@ AudioBusHacker 提供 64 个对数分布频点，更新率约为 25 Hz。Niagara
   `Plugins/WwiseSoundEngine/ThirdParty/x64_vc170/<Profile|Release|Debug>/bin/AudioBusHacker.dll`。
 - `IsSpectrumValid` 为 false 时，依次检查 Bus 名称、AudioBusHacker 插入位置、音频路由和回调注册。
 - 目前仅支持混合单路频谱；逐声道 Peak/RMS 仍通过 `Get Audio Bus Visualization` 获取。
+
+完整的 64 柱 CPU/GPU Niagara 搭建示例见：
+[`Niagara完整使用示例.md`](./Niagara完整使用示例.md)。
