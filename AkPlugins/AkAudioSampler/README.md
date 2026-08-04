@@ -99,3 +99,6 @@ AudioBusHacker 提供 64 个对数分布频点，更新率约为 25 Hz。Niagara
 
 完整的 64 柱 CPU/GPU Niagara 搭建示例见：
 [`Niagara完整使用示例.md`](./Niagara完整使用示例.md)。
+
+三类现有 Niagara 系统的 AkWwise 改造决策、故障原因、转换脚本和验证方法见：
+[`Docs/AkWwiseNiagara粒子改造方案库.md`](./Docs/AkWwiseNiagara粒子改造方案库.md)。

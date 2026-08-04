@@ -1,5 +1,7 @@
 #include "AkAudioSamplerNiagaraEditorLibrary.h"
+#include "NiagaraDataInterfaceAkWwiseSpectrum.h"
 
+#include "NiagaraDataInterfaceAudioSpectrum.h"
 #include "NiagaraSystem.h"
 
 #if WITH_EDITOR
@@ -18,6 +20,7 @@
 #include "NiagaraStackFunctionInputBinder.h"
 #include "NiagaraTypes.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 #include "ViewModels/Stack/NiagaraStackGraphUtilities.h"
 
 namespace AkAudioSamplerNiagaraEditor
@@ -659,6 +662,139 @@ bool UAkAudioSamplerNiagaraEditorLibrary::SetParticleUpdateFunctionFloatInputLin
 		*FunctionScriptName.ToString(),
 		*InputName.ToString(),
 		*LinkedParameterName.ToString());
+	return true;
+#else
+	OutMessage = TEXT("This function is only available in editor builds.");
+	return false;
+#endif
+}
+
+bool UAkAudioSamplerNiagaraEditorLibrary::ReplaceParticleUpdateAudioSpectrumWithAkWwise(
+	UNiagaraSystem* System,
+	FString BusName,
+	int32 Resolution,
+	float MinimumFrequency,
+	float MaximumFrequency,
+	float NoiseFloorDb,
+	FString& OutMessage)
+{
+#if WITH_EDITOR
+	using namespace AkAudioSamplerNiagaraEditor;
+
+	if (System == nullptr)
+	{
+		OutMessage = TEXT("Niagara system is null.");
+		return false;
+	}
+
+	FObjectPropertyBase* DataInterfaceProperty = FindFProperty<FObjectPropertyBase>(
+		UNiagaraNodeInput::StaticClass(),
+		TEXT("DataInterface"));
+	if (DataInterfaceProperty == nullptr)
+	{
+		OutMessage = TEXT("UNiagaraNodeInput.DataInterface property was not found.");
+		return false;
+	}
+
+	int32 UpdatedInterfaceCount = 0;
+	for (const FNiagaraEmitterHandle& EmitterHandle : System->GetEmitterHandles())
+	{
+		const FVersionedNiagaraEmitter VersionedEmitter = EmitterHandle.GetInstance();
+		FVersionedNiagaraEmitterData* EmitterData = VersionedEmitter.GetEmitterData();
+		UNiagaraScriptSource* ScriptSource = EmitterData != nullptr
+			? Cast<UNiagaraScriptSource>(EmitterData->GraphSource)
+			: nullptr;
+		UNiagaraGraph* Graph = ScriptSource != nullptr ? ScriptSource->NodeGraph : nullptr;
+		if (Graph == nullptr)
+		{
+			continue;
+		}
+
+		bool bUsesAudioSpectrumUpdate = false;
+		TArray<UNiagaraNodeOutput*> OutputNodes;
+		Graph->GetNodesOfClass(OutputNodes);
+		for (UNiagaraNodeOutput* OutputNode : OutputNodes)
+		{
+			if (OutputNode == nullptr ||
+				OutputNode->GetUsage() != ENiagaraScriptUsage::ParticleUpdateScript)
+			{
+				continue;
+			}
+
+			TArray<UNiagaraNodeFunctionCall*> ModuleNodes;
+			GetOrderedModuleNodes(*OutputNode, ModuleNodes);
+			bUsesAudioSpectrumUpdate = ModuleNodes.ContainsByPredicate(
+				[](const UNiagaraNodeFunctionCall* ModuleNode)
+				{
+					return ModuleNode != nullptr && ModuleNode->FunctionScript != nullptr &&
+						ModuleNode->FunctionScript->GetFName() == TEXT("AudioSpectrumUpdate");
+				});
+			if (bUsesAudioSpectrumUpdate)
+			{
+				break;
+			}
+		}
+		if (!bUsesAudioSpectrumUpdate)
+		{
+			continue;
+		}
+
+		TArray<UNiagaraNodeInput*> InputNodes;
+		Graph->GetNodesOfClass(InputNodes);
+		for (UNiagaraNodeInput* InputNode : InputNodes)
+		{
+			if (InputNode == nullptr ||
+				!InputNode->Input.GetName().ToString().EndsWith(TEXT("Audio Spectrum")))
+			{
+				continue;
+			}
+
+			UNiagaraDataInterface* ExistingInterface = Cast<UNiagaraDataInterface>(
+				DataInterfaceProperty->GetObjectPropertyValue_InContainer(InputNode));
+			if (ExistingInterface == nullptr ||
+				!ExistingInterface->IsA<UNiagaraDataInterfaceAudioSpectrum>())
+			{
+				continue;
+			}
+
+			InputNode->Modify();
+			Graph->Modify();
+			UNiagaraDataInterfaceAkWwiseAudioSpectrum* AkInterface =
+				Cast<UNiagaraDataInterfaceAkWwiseAudioSpectrum>(ExistingInterface);
+			if (AkInterface == nullptr)
+			{
+				AkInterface = NewObject<UNiagaraDataInterfaceAkWwiseAudioSpectrum>(
+					InputNode,
+					NAME_None,
+					RF_Transactional);
+				DataInterfaceProperty->SetObjectPropertyValue_InContainer(InputNode, AkInterface);
+			}
+
+			AkInterface->Modify();
+			AkInterface->BusName = BusName;
+			AkInterface->Resolution = FMath::Clamp(Resolution, 16, 1024);
+			AkInterface->MinimumFrequency = FMath::Clamp(MinimumFrequency, 20.0f, 20000.0f);
+			AkInterface->MaximumFrequency = FMath::Clamp(MaximumFrequency, 20.0f, 20000.0f);
+			AkInterface->NoiseFloorDb = FMath::Clamp(NoiseFloorDb, -120.0f, 0.0f);
+			AkInterface->bAutoRegisterVisualizationCallback = true;
+			AkInterface->StaleDataTimeoutSeconds = 0.25f;
+			++UpdatedInterfaceCount;
+		}
+	}
+
+	if (UpdatedInterfaceCount == 0)
+	{
+		OutMessage = TEXT(
+			"No Particle Update AudioSpectrumUpdate module with an Audio Spectrum DI was found.");
+		return false;
+	}
+
+	System->Modify();
+	System->RequestCompile(true);
+	OutMessage = FString::Printf(
+		TEXT("Configured %d Particle Update Audio Spectrum interface(s) for Wwise Bus '%s'."),
+		UpdatedInterfaceCount,
+		*BusName);
 	return true;
 #else
 	OutMessage = TEXT("This function is only available in editor builds.");

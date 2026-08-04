@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "NiagaraDataInterface.h"
+#include "NiagaraDataInterfaceAudioSpectrum.h"
 
 #include "NiagaraDataInterfaceAkWwiseSpectrum.generated.h"
 
@@ -104,5 +105,54 @@ protected:
 	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
 #endif
 
+	virtual bool CopyToInternal(UNiagaraDataInterface* Destination) const override;
+};
+
+/** CPU adapter that lets stock AudioSpectrum modules consume Wwise spectrum data. */
+UCLASS(
+	EditInlineNew,
+	Category = "Wwise Audio",
+	CollapseCategories,
+	meta = (DisplayName = "Ak Wwise Audio Spectrum (CPU)"))
+class AKAUDIOSAMPLER_API UNiagaraDataInterfaceAkWwiseAudioSpectrum
+	: public UNiagaraDataInterfaceAudioSpectrum
+{
+	GENERATED_BODY()
+
+public:
+	UNiagaraDataInterfaceAkWwiseAudioSpectrum(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, Category = "Wwise")
+	FString BusName;
+
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = "Wwise")
+	bool bAutoRegisterVisualizationCallback;
+
+	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = "Spectrum", meta = (ClampMin = "0.0"))
+	float StaleDataTimeoutSeconds;
+
+	void GetSpectrumValue(FVectorVMExternalFunctionContext& Context);
+	void GetNumChannels(FVectorVMExternalFunctionContext& Context);
+
+	virtual void PostInitProperties() override;
+	virtual bool InitPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance) override;
+	virtual void DestroyPerInstanceData(void* PerInstanceData, FNiagaraSystemInstance* SystemInstance) override;
+	virtual int32 PerInstanceDataSize() const override;
+	virtual bool HasPreSimulateTick() const override { return true; }
+	virtual bool PerInstanceTick(
+		void* PerInstanceData,
+		FNiagaraSystemInstance* SystemInstance,
+		float DeltaSeconds) override;
+	virtual void GetVMExternalFunction(
+		const FVMExternalFunctionBindingInfo& BindingInfo,
+		void* InstanceData,
+		FVMExternalFunction& OutFunc) override;
+	virtual bool CanExecuteOnTarget(ENiagaraSimTarget Target) const override;
+	virtual bool Equals(const UNiagaraDataInterface* Other) const override;
+
+protected:
+#if WITH_EDITORONLY_DATA
+	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
+#endif
 	virtual bool CopyToInternal(UNiagaraDataInterface* Destination) const override;
 };

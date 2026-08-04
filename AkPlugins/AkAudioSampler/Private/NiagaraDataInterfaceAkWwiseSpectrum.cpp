@@ -135,12 +135,14 @@ struct FNiagaraDataInterfaceProxyAkWwiseSpectrum : public FNiagaraDataInterfaceP
 	TMap<FNiagaraSystemInstanceID, FInstanceData_RenderThread> PerInstanceData;
 };
 
-int32 GetResolution(const UNiagaraDataInterfaceAkWwiseSpectrum& DataInterface)
+template <typename TSpectrumInterface>
+int32 GetResolution(const TSpectrumInterface& DataInterface)
 {
 	return FMath::Clamp(DataInterface.Resolution, MinResolution, MaxResolution);
 }
 
-uint32 GetSettingsHash(const UNiagaraDataInterfaceAkWwiseSpectrum& DataInterface)
+template <typename TSpectrumInterface>
+uint32 GetSettingsHash(const TSpectrumInterface& DataInterface)
 {
 	uint32 Hash = GetTypeHash(DataInterface.BusName);
 	Hash = HashCombine(Hash, GetTypeHash(GetResolution(DataInterface)));
@@ -165,8 +167,9 @@ bool SetZeroSpectrum(FInstanceData_GameThread& InstanceData, int32 Resolution)
 	return bChanged;
 }
 
+template <typename TSpectrumInterface>
 bool ResampleSpectrum(
-	const UNiagaraDataInterfaceAkWwiseSpectrum& DataInterface,
+	const TSpectrumInterface& DataInterface,
 	const FAkAudioBusHackerVisualizationData& Source,
 	FInstanceData_GameThread& InstanceData)
 {
@@ -497,8 +500,6 @@ void UNiagaraDataInterfaceAkWwiseSpectrum::IsSpectrumValid(
 void UNiagaraDataInterfaceAkWwiseSpectrum::GetFunctionsInternal(
 	TArray<FNiagaraFunctionSignature>& OutFunctions) const
 {
-	Super::GetFunctionsInternal(OutFunctions);
-
 	FNiagaraFunctionSignature DefaultSignature;
 	DefaultSignature.Inputs.Emplace(FNiagaraTypeDefinition(GetClass()), TEXT("Spectrum"));
 	DefaultSignature.bMemberFunction = true;
@@ -708,6 +709,257 @@ bool UNiagaraDataInterfaceAkWwiseSpectrum::CopyToInternal(
 	DestinationSpectrum->MinimumFrequency = MinimumFrequency;
 	DestinationSpectrum->MaximumFrequency = MaximumFrequency;
 	DestinationSpectrum->NoiseFloorDb = NoiseFloorDb;
+	DestinationSpectrum->bAutoRegisterVisualizationCallback = bAutoRegisterVisualizationCallback;
+	DestinationSpectrum->StaleDataTimeoutSeconds = StaleDataTimeoutSeconds;
+	return true;
+}
+
+UNiagaraDataInterfaceAkWwiseAudioSpectrum::UNiagaraDataInterfaceAkWwiseAudioSpectrum(
+	const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	, BusName(TEXT("Master Audio Bus"))
+	, bAutoRegisterVisualizationCallback(true)
+	, StaleDataTimeoutSeconds(0.25f)
+{
+}
+
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::PostInitProperties()
+{
+	Super::PostInitProperties();
+	if (HasAnyFlags(RF_ClassDefaultObject))
+	{
+		const ENiagaraTypeRegistryFlags Flags =
+			ENiagaraTypeRegistryFlags::AllowAnyVariable
+			| ENiagaraTypeRegistryFlags::AllowParameter;
+		FNiagaraTypeRegistry::Register(FNiagaraTypeDefinition(GetClass()), Flags);
+	}
+}
+
+bool UNiagaraDataInterfaceAkWwiseAudioSpectrum::InitPerInstanceData(
+	void* PerInstanceData,
+	FNiagaraSystemInstance* SystemInstance)
+{
+	using namespace NiagaraAkWwiseSpectrumPrivate;
+	(void)SystemInstance;
+
+	FInstanceData_GameThread* InstanceData = new (PerInstanceData) FInstanceData_GameThread();
+	InstanceData->Spectrum.SetNumZeroed(GetResolution(*this));
+	if (bAutoRegisterVisualizationCallback)
+	{
+		InstanceData->bOwnsVisualizationRegistration =
+			FAkAudioSamplerModule::AcquireVisualizationCallback(
+				&UAkAudioSampler::VisualizationCallback);
+	}
+	return true;
+}
+
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::DestroyPerInstanceData(
+	void* PerInstanceData,
+	FNiagaraSystemInstance* SystemInstance)
+{
+	using namespace NiagaraAkWwiseSpectrumPrivate;
+	(void)SystemInstance;
+
+	FInstanceData_GameThread* InstanceData =
+		static_cast<FInstanceData_GameThread*>(PerInstanceData);
+	if (InstanceData->bOwnsVisualizationRegistration)
+	{
+		FAkAudioSamplerModule::ReleaseVisualizationCallback();
+		InstanceData->bOwnsVisualizationRegistration = false;
+	}
+	InstanceData->~FInstanceData_GameThread();
+}
+
+int32 UNiagaraDataInterfaceAkWwiseAudioSpectrum::PerInstanceDataSize() const
+{
+	return sizeof(NiagaraAkWwiseSpectrumPrivate::FInstanceData_GameThread);
+}
+
+bool UNiagaraDataInterfaceAkWwiseAudioSpectrum::PerInstanceTick(
+	void* PerInstanceData,
+	FNiagaraSystemInstance* SystemInstance,
+	float DeltaSeconds)
+{
+	using namespace NiagaraAkWwiseSpectrumPrivate;
+	(void)SystemInstance;
+
+	FInstanceData_GameThread* InstanceData =
+		static_cast<FInstanceData_GameThread*>(PerInstanceData);
+	if (!InstanceData)
+	{
+		return false;
+	}
+
+	if (bAutoRegisterVisualizationCallback && !InstanceData->bOwnsVisualizationRegistration)
+	{
+		InstanceData->bOwnsVisualizationRegistration =
+			FAkAudioSamplerModule::AcquireVisualizationCallback(
+				&UAkAudioSampler::VisualizationCallback);
+	}
+	else if (!bAutoRegisterVisualizationCallback && InstanceData->bOwnsVisualizationRegistration)
+	{
+		FAkAudioSamplerModule::ReleaseVisualizationCallback();
+		InstanceData->bOwnsVisualizationRegistration = false;
+	}
+
+	const float SafeDeltaSeconds = FMath::Max(DeltaSeconds, 0.0f);
+	const uint32 SettingsHash = GetSettingsHash(*this);
+	const bool bBusChanged = InstanceData->LastBusName != BusName;
+	const bool bSettingsChanged =
+		!InstanceData->bSettingsInitialized
+		|| InstanceData->LastSettingsHash != SettingsHash;
+
+	FAkAudioBusHackerVisualizationData Snapshot;
+	const bool bHasSnapshot = UAkAudioSampler::GetLatestVisualizationData(BusName, Snapshot);
+	if (bHasSnapshot)
+	{
+		const bool bNewSnapshot = bBusChanged || Snapshot.Sequence != InstanceData->LastSequence;
+		InstanceData->SecondsSinceLastSnapshot = bNewSnapshot
+			? 0.0f
+			: InstanceData->SecondsSinceLastSnapshot + SafeDeltaSeconds;
+		if (bNewSnapshot || bSettingsChanged)
+		{
+			ResampleSpectrum(*this, Snapshot, *InstanceData);
+		}
+		InstanceData->LastSequence = Snapshot.Sequence;
+	}
+	else
+	{
+		InstanceData->SecondsSinceLastSnapshot += SafeDeltaSeconds;
+		if (bBusChanged || bSettingsChanged)
+		{
+			SetZeroSpectrum(*InstanceData, GetResolution(*this));
+			InstanceData->LastSequence = INDEX_NONE;
+		}
+	}
+
+	if (StaleDataTimeoutSeconds > 0.0f
+		&& InstanceData->SecondsSinceLastSnapshot >= StaleDataTimeoutSeconds)
+	{
+		SetZeroSpectrum(*InstanceData, GetResolution(*this));
+	}
+
+	InstanceData->LastBusName = BusName;
+	InstanceData->LastSettingsHash = SettingsHash;
+	InstanceData->bSettingsInitialized = true;
+	return false;
+}
+
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetSpectrumValue(
+	FVectorVMExternalFunctionContext& Context)
+{
+	using namespace NiagaraAkWwiseSpectrumPrivate;
+
+	VectorVM::FUserPtrHandler<FInstanceData_GameThread> InstanceData(Context);
+	VectorVM::FExternalFuncInputHandler<float> InNormalizedPosition(Context);
+	VectorVM::FExternalFuncInputHandler<int32> InChannelIndex(Context);
+	VectorVM::FExternalFuncRegisterHandler<float> OutAmplitude(Context);
+	for (int32 Index = 0; Index < Context.GetNumInstances(); ++Index)
+	{
+		*OutAmplitude.GetDestAndAdvance() = SampleSpectrum(
+			InstanceData.Get(),
+			InNormalizedPosition.GetAndAdvance(),
+			InChannelIndex.GetAndAdvance());
+	}
+}
+
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetNumChannels(
+	FVectorVMExternalFunctionContext& Context)
+{
+	using namespace NiagaraAkWwiseSpectrumPrivate;
+
+	VectorVM::FUserPtrHandler<FInstanceData_GameThread> InstanceData(Context);
+	VectorVM::FExternalFuncRegisterHandler<int32> OutNumChannels(Context);
+	const int32 NumChannels = InstanceData.Get() && InstanceData->bHasValidData ? 1 : 0;
+	for (int32 Index = 0; Index < Context.GetNumInstances(); ++Index)
+	{
+		*OutNumChannels.GetDestAndAdvance() = NumChannels;
+	}
+}
+
+#if WITH_EDITORONLY_DATA
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetFunctionsInternal(
+	TArray<FNiagaraFunctionSignature>& OutFunctions) const
+{
+	FNiagaraFunctionSignature DefaultSignature;
+	DefaultSignature.Inputs.Emplace(FNiagaraTypeDefinition(GetClass()), TEXT("Spectrum"));
+	DefaultSignature.bMemberFunction = true;
+	DefaultSignature.bRequiresContext = false;
+	DefaultSignature.bSupportsCPU = true;
+	DefaultSignature.bSupportsGPU = false;
+
+	FNiagaraFunctionSignature& SpectrumSignature = OutFunctions.Add_GetRef(DefaultSignature);
+	SpectrumSignature.Name = UNiagaraDataInterfaceAudioSpectrum::GetSpectrumFunctionName;
+	SpectrumSignature.Inputs.Emplace(
+		FNiagaraTypeDefinition::GetFloatDef(),
+		TEXT("NormalizedPositionInSpectrum"));
+	SpectrumSignature.Inputs.Emplace(FNiagaraTypeDefinition::GetIntDef(), TEXT("ChannelIndex"));
+	SpectrumSignature.Outputs.Emplace(FNiagaraTypeDefinition::GetFloatDef(), TEXT("Amplitude"));
+
+	FNiagaraFunctionSignature& ChannelsSignature = OutFunctions.Add_GetRef(DefaultSignature);
+	ChannelsSignature.Name = UNiagaraDataInterfaceAudioSpectrum::GetNumChannelsFunctionName;
+	ChannelsSignature.Outputs.Emplace(FNiagaraTypeDefinition::GetIntDef(), TEXT("NumChannels"));
+}
+#endif
+
+DEFINE_NDI_DIRECT_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetSpectrumValue);
+DEFINE_NDI_DIRECT_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetNumChannels);
+
+void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetVMExternalFunction(
+	const FVMExternalFunctionBindingInfo& BindingInfo,
+	void* InstanceData,
+	FVMExternalFunction& OutFunc)
+{
+	(void)InstanceData;
+	if (BindingInfo.Name == UNiagaraDataInterfaceAudioSpectrum::GetSpectrumFunctionName)
+	{
+		NDI_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetSpectrumValue)::Bind(
+			this,
+			OutFunc);
+	}
+	else if (BindingInfo.Name == UNiagaraDataInterfaceAudioSpectrum::GetNumChannelsFunctionName)
+	{
+		NDI_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetNumChannels)::Bind(
+			this,
+			OutFunc);
+	}
+}
+
+bool UNiagaraDataInterfaceAkWwiseAudioSpectrum::CanExecuteOnTarget(
+	ENiagaraSimTarget Target) const
+{
+	return Target == ENiagaraSimTarget::CPUSim;
+}
+
+bool UNiagaraDataInterfaceAkWwiseAudioSpectrum::Equals(
+	const UNiagaraDataInterface* Other) const
+{
+	if (!Super::Equals(Other))
+	{
+		return false;
+	}
+	const UNiagaraDataInterfaceAkWwiseAudioSpectrum* OtherSpectrum =
+		Cast<const UNiagaraDataInterfaceAkWwiseAudioSpectrum>(Other);
+	return OtherSpectrum
+		&& OtherSpectrum->BusName == BusName
+		&& OtherSpectrum->bAutoRegisterVisualizationCallback == bAutoRegisterVisualizationCallback
+		&& OtherSpectrum->StaleDataTimeoutSeconds == StaleDataTimeoutSeconds;
+}
+
+bool UNiagaraDataInterfaceAkWwiseAudioSpectrum::CopyToInternal(
+	UNiagaraDataInterface* Destination) const
+{
+	if (!Super::CopyToInternal(Destination))
+	{
+		return false;
+	}
+	UNiagaraDataInterfaceAkWwiseAudioSpectrum* DestinationSpectrum =
+		Cast<UNiagaraDataInterfaceAkWwiseAudioSpectrum>(Destination);
+	if (!DestinationSpectrum)
+	{
+		return false;
+	}
+	DestinationSpectrum->BusName = BusName;
 	DestinationSpectrum->bAutoRegisterVisualizationCallback = bAutoRegisterVisualizationCallback;
 	DestinationSpectrum->StaleDataTimeoutSeconds = StaleDataTimeoutSeconds;
 	return true;

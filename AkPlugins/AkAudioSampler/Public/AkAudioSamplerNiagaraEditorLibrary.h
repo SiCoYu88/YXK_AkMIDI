@@ -49,4 +49,15 @@ public:
 		FName InputName,
 		FName LinkedParameterName,
 		FString& OutMessage);
+
+	/** Replaces a stock Audio Spectrum DI used by Particle Update with the Ak Wwise-compatible DI. */
+	UFUNCTION(BlueprintCallable, Category = "AkAudioSampler|Niagara")
+	static bool ReplaceParticleUpdateAudioSpectrumWithAkWwise(
+		UNiagaraSystem* System,
+		FString BusName,
+		int32 Resolution,
+		float MinimumFrequency,
+		float MaximumFrequency,
+		float NoiseFloorDb,
+		FString& OutMessage);
 };
