@@ -35,7 +35,7 @@ LogAkAudioSampler: Loaded AudioBusHacker visualization API from .../AudioBusHack
 
 新增或更新 `UNiagaraDataInterfaceAkWwiseSpectrum` 后，需要完整编译并重启编辑器，不能只依赖 Live Coding。
 
-## 2. 打开示例关卡
+## 2. Niagara示例关卡
 
 1. 在 Content Browser 中打开：
 
@@ -77,7 +77,7 @@ Event BeginPlay
 
 建议先播放 Wwise Event，再创建 Niagara System。顺序相反也不会报错，但首个 Wwise 频谱快照到达前可视化数据暂时无效。
 
-## 4. 蓝图中读取 `Get Audio Bus Visualization`
+## 4. 蓝图中使用 `Get Audio Bus Visualization`
 
 如果蓝图需要直接读取 Wwise Bus 的实时音量、波形或频谱数据，可以使用 `Get Audio Bus Visualization`。该节点不负责播放声音，只读取 `AudioBusHacker` 已经回调到 UE 的最新快照。
 
