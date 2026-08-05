@@ -1,9 +1,9 @@
 # Ak Wwise Spectrum Niagara 使用示例
 
-工程中已经生成可直接使用的 Niagara System，不需要再手工创建 Scratch Pad、粒子属性或连接 Data Interface 节点。
+工程中已经添加了一些从NiagaraAudioVisualizer复刻的示例，后续如果使用到新的Niagara特效时，可以参考已有示例
 
 ```text
-/Game/WwiseAssets/AkWwiseSpectrum/NS_WwiseMusicSpectrum_AkDrivenV2
+/Game/WwiseAssets/NiagaraWwiseVisualizer
 ```
 
 该 System 使用 `UNiagaraDataInterfaceAkWwiseSpectrum` 读取 Wwise `Music` Bus 的实时频谱，并显示为 Niagara 音频可视化效果。
@@ -35,19 +35,19 @@ LogAkAudioSampler: Loaded AudioBusHacker visualization API from .../AudioBusHack
 
 新增或更新 `UNiagaraDataInterfaceAkWwiseSpectrum` 后，需要完整编译并重启编辑器，不能只依赖 Live Coding。
 
-## 2. 直接放入关卡
+## 2. 打开示例关卡
 
 1. 在 Content Browser 中打开：
 
    ```text
-   /Game/WwiseAssets/AkWwiseSpectrum/NS_WwiseMusicSpectrum_AkDrivenV2
+   /Game/WwiseAssets/DemoRoom/Maps/WwiseVisualizer_Demo
    ```
+   
+2. 使用"Play From Here"运行 PIE。
 
-2. 将 `NS_WwiseMusicSpectrum_AkDrivenV2` 直接拖入关卡。
-3. 在关卡开始时播放一个路由到 `Music` Bus 的 Wwise Event。
-4. 运行 PIE。
+3. 查看已有的Wwise音频可视化的Niagara示例
 
-如果编辑器在资产生成前已经打开，而 Content Browser 尚未显示该 System，请刷新对应目录或重启编辑器。
+Wwise的NiagaraDataInterfaceAkWwiseSpectrum中已经注册和监听了音频可视化接口
 
 不需要在蓝图中调用 `Register Audio Bus Visualization`。System 内的 Data Interface 默认启用了 `Auto Register Visualization Callback`，Niagara 实例创建和销毁时会自动持有和释放共享回调。
 
@@ -59,7 +59,7 @@ LogAkAudioSampler: Loaded AudioBusHacker visualization API from .../AudioBusHack
 Event BeginPlay
     -> Post Wwise Event
     -> Spawn System at Location
-       System = NS_WwiseMusicSpectrum_AkDrivenV2
+       System = NS_StepLine
 ```
 
 也可以使用 `Spawn System Attached` 将频谱跟随 Actor：
@@ -68,7 +68,7 @@ Event BeginPlay
 Event BeginPlay
     -> Post Wwise Event
     -> Spawn System Attached
-       System = NS_WwiseMusicSpectrum_AkDrivenV2
+       System = NS_StepLine
        Attach Component = Root Component
        Location Type = Keep Relative Offset
 ```
@@ -79,7 +79,7 @@ Event BeginPlay
 
 ## 4. 修改频谱参数
 
-打开 `NS_WwiseMusicSpectrum_AkDrivenV2`，选择 `NE_WwiseSpectrumBars_AkDriven` Emitter，在 `Particle Update` 中找到 `WwiseAudioSpectrumV2` 模块，展开 `Ak Wwise Spectrum` 输入。
+打开 `NS_StepLine`，选择 `NE_BasicWwiseVisualizer` Emitter，在 `Particle Update` 中找到 `WwiseAudioSpectrum` 模块，展开 `Ak Wwise Spectrum` 输入。
 
 当前预设参数：
 
@@ -102,20 +102,20 @@ Event BeginPlay
 该资产已经完成以下配置，通常不需要修改：
 
 ```text
-NS_WwiseMusicSpectrum_AkDrivenV2
-└─ NE_WwiseSpectrumBars_AkDriven
+NS_StepLine
+└─ NE_BasicWwiseVisualizer
    └─ Particle Update
-      ├─ WwiseAudioSpectrumV2
-      ├─ AudioSpectrumUpdate
+      ├─ WwiseAudioSpectrum
+      ├─ WwiseAudioSpectrumUpdate
       ├─ ScaleSpriteSize
       └─ ScaleRibbonWidth
 ```
 
-`ScaleSpriteSize` 和 `ScaleRibbonWidth` 直接绑定 `Output.WwiseAudioSpectrumV2.AudioAmplitude`：幅度经过 `0.10 + AudioAmplitude * 20` 放大后，分别驱动 Sprite 高度和 Ribbon 宽度。该输出绑定不能删除，否则即使 Ak Data Interface 已经取得数据，Niagara 也不会产生可见响应。
+`ScaleSpriteSize` 和 `ScaleRibbonWidth` 直接绑定 `Output.WwiseAudioSpectrum.AudioAmplitude`：幅度经过 `0.10 + AudioAmplitude * 20` 放大后，分别驱动 Sprite 高度和 Ribbon 宽度。该输出绑定不能删除，否则即使 Ak Data Interface 已经取得数据，Niagara 也不会产生可见响应。
 
 System 只包含 Wwise 频谱 Emitter，不包含 UE Submix 对照 Emitter，也没有引用其他 System 的私有内嵌 Emitter。
 
-该 System 会依赖工程中现有的 `NE_BasicAudioVisualizer`、`AudioSpectrumUpdate` 和 `WwiseAudioSpectrumV2`。迁移到其他工程时，应通过 Unreal 的 `Migrate` 一并复制依赖，不要只复制单个 `.uasset` 文件。
+该 System 会依赖工程中现有的 `NE_BasicWwiseVisualizer`、`WwiseAudioSpectrumUpdate` 和 `WwiseAudioSpectrum`。迁移到其他工程时，应通过 Unreal 的 `Migrate` 一并复制依赖，不要只复制单个 `.uasset` 文件。
 
 ## 6. 运行时预期
 
@@ -141,11 +141,12 @@ System 只包含 Wwise 频谱 Emitter，不包含 UE Submix 对照 Emitter，也
 生成的资产文件：
 
 ```text
-WwiseDemoGame/Content/WwiseAssets/AkWwiseSpectrum/NS_WwiseMusicSpectrum_AkDrivenV2.uasset
+WwiseDemoGame/Content/WwiseAssets/NiagaraWwiseVisualizer/Examples
 ```
 
-Unreal 资产引用：
+目录结构：仿照NiagaraAudioVisualizer
 
-```text
-NiagaraSystem'/Game/WwiseAssets/AkWwiseSpectrum/NS_WwiseMusicSpectrum_AkDrivenV2.NS_WwiseMusicSpectrum_AkDrivenV2'
-```
+1. Blueprint：存放一些蓝图文件，目前存放的播放Wwise的BP_AkVisualize_Niagara.uasset
+2. Emitter：存放一些Niagara的Emitter发射器，目前存放基类发射器NE_BasicWwiseVisualizer.uasset
+3. Examples：复刻NiagaraAudioVisualizer的NiagaraSystem
+4. Module：复刻NiagaraAudioVisualizer的ModuleScripts
