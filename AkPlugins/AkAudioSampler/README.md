@@ -97,8 +97,11 @@ AudioBusHacker 提供 64 个对数分布频点，更新率约为 25 Hz。Niagara
 - `IsSpectrumValid` 为 false 时，依次检查 Bus 名称、AudioBusHacker 插入位置、音频路由和回调注册。
 - 目前仅支持混合单路频谱；逐声道 Peak/RMS 仍通过 `Get Audio Bus Visualization` 获取。
 
-完整的 64 柱 CPU/GPU Niagara 搭建示例见：
-[`Niagara完整使用示例.md`](./Niagara完整使用示例.md)。
+Niagara音频可视化Wwise音频示例：
+[`./Docs/AkAudioSampler在Wwise中使用文档.md`](./Docs/AkAudioSampler在Wwise中使用文档.md)。
 
 三类现有 Niagara 系统的 AkWwise 改造决策、故障原因、转换脚本和验证方法见：
-[`Docs/AkWwiseNiagara粒子改造方案库.md`](./Docs/AkWwiseNiagara粒子改造方案库.md)。
+[`Docs/AkAudioSampler设计文档.md`](./Docs/AkAudioSampler设计文档.md)。
+
+AkAudioSampler 技术方案文档
+[`Docs/AkAudioSampler技术文档.md`](./Docs/AkAudioSampler技术文档.md)
