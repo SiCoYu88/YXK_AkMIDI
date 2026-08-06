@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "HAL/Runnable.h"
 #include "IPixelStreaming2AudioProducer.h"
+#include "IPixelStreaming2InputHandler.h"
 #include "AK/SoundEngine/Common/AkCallbackTypes.h"
 
 #include <atomic>
@@ -20,6 +21,7 @@ class FWwisePixelStreaming2Producer final : public IPixelStreaming2AudioProducer
 struct FWwisePixelStreaming2Config
 {
 	bool bEnabled = true;
+	bool bForwardRemoteInputToAsyncInput = true;
 	FString StreamerId;
 	uint64 OutputDeviceId = 0;
 	int32 QueueSlots = 8;
@@ -56,6 +58,9 @@ private:
 	bool RebindCaptureInternal(bool bAutomatic);
 	void TryRecoverStalledCapture();
 	bool TryAttachStreamer();
+	bool TryAttachRemoteInputBridge();
+	void DetachRemoteInputBridge();
+	void HandleClosedConnection(FString StreamerId, FString PlayerId);
 	void DetachStreamer();
 	void ApplyGain(float* Data, int32 NumSamples) const;
 
@@ -63,6 +68,10 @@ private:
 	TUniquePtr<FWwiseAudioQueue> Queue;
 	TSharedPtr<FWwisePixelStreaming2Producer> Producer;
 	TWeakPtr<IPixelStreaming2Streamer> Streamer;
+	TWeakPtr<IPixelStreaming2InputHandler> RemoteInputHandler;
+	TMap<FString, IPixelStreaming2InputHandler::MessageHandlerFn> OriginalInputHandlers;
+	FString AttachedStreamerId;
+	FDelegateHandle ClosedConnectionHandle;
 	FAkAudioDevice* WwiseDevice = nullptr;
 	class FRunnableThread* WorkerThread = nullptr;
 	class FEvent* WorkEvent = nullptr;
@@ -89,5 +98,6 @@ private:
 	bool bLoggedWaitingForWwise = false;
 	bool bLoggedWaitingForPixelStreaming = false;
 	bool bLoggedWaitingForStreamer = false;
+	bool bLoggedWaitingForInputHandler = false;
 	int32 LastCaptureRegistrationError = INDEX_NONE;
 };

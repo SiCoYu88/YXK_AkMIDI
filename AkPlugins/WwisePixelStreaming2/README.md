@@ -5,7 +5,7 @@
 ## 安装
 
 1. 将整个 `WwisePixelStreaming2` 目录复制到 UE 项目的 `Plugins` 目录。
-2. 确保项目已安装 Wwise 2025.1 集成，并启用 `Wwise`、`PixelStreaming2` 和 `WwisePixelStreaming2` 插件。
+2. 确保项目已安装 Wwise 2025.1 和 `AsyncInputSystem`，并启用 `Wwise`、`PixelStreaming2`、`AsyncInputSystem` 和 `WwisePixelStreaming2` 插件。
 3. 重新生成项目文件并编译。
 
 插件描述已设置为默认启用。仍建议确认项目的 `.uproject` 中没有将它显式禁用；成功加载后，启动日志的插件挂载列表中应包含 `WwisePixelStreaming2`。C++ 插件必须随项目重新编译和打包，仅复制到已经生成的运行包中不会生效。
@@ -19,6 +19,7 @@
 ```ini
 [WwisePixelStreaming2]
 Enabled=true
+ForwardRemoteInputToAsyncInput=true
 StreamerId=
 OutputDeviceId=0
 QueueSlots=8
@@ -30,6 +31,7 @@ CaptureStallTimeoutSeconds=2.0
 ```
 
 - `StreamerId` 为空时使用 Pixel Streaming 2 默认 Streamer。
+- `ForwardRemoteInputToAsyncInput=true` 时，远程键鼠事件会旁路复制给 `AsyncInputSystem`；Pixel Streaming 2 原输入处理保持不变。
 - `OutputDeviceId=0` 表示 Wwise 主输出；其他值使用 `AddOutput` 或 `GetOutputID` 返回的设备 ID。
 - 队列满时丢弃最新缓冲区，绝不阻塞 Wwise 实时音频线程。
 - `MaxFrames` 或 `MaxChannels` 小于实际 Wwise 输出时，对应缓冲区会被拒绝。

@@ -1,6 +1,7 @@
 #include "WwisePixelStreaming2Bridge.h"
 
 #include "AkAudioDevice.h"
+#include "AsyncInputRemoteBridge.h"
 #include "HAL/Event.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformProcess.h"
@@ -10,6 +11,7 @@
 #include "IPixelStreaming2Streamer.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleManager.h"
+#include "PixelStreaming2Delegates.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWwisePixelStreaming2, Log, All);
 
@@ -27,6 +29,7 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	}
 
 	GConfig->GetBool(ConfigSection, TEXT("Enabled"), Result.bEnabled, GGameIni);
+	GConfig->GetBool(ConfigSection, TEXT("ForwardRemoteInputToAsyncInput"), Result.bForwardRemoteInputToAsyncInput, GGameIni);
 	GConfig->GetString(ConfigSection, TEXT("StreamerId"), Result.StreamerId, GGameIni);
 	FString OutputDeviceId;
 	if (GConfig->GetString(ConfigSection, TEXT("OutputDeviceId"), OutputDeviceId, GGameIni))
@@ -143,6 +146,7 @@ void FWwisePixelStreaming2Bridge::TryInitialize()
 	{
 		return;
 	}
+	TryAttachRemoteInputBridge();
 	if (!bCaptureRegistered)
 	{
 		TryRegisterWwiseCapture();
@@ -467,18 +471,126 @@ bool FWwisePixelStreaming2Bridge::TryAttachStreamer()
 
 	TargetStreamer->AddAudioProducer(Producer);
 	Streamer = TargetStreamer;
+	AttachedStreamerId = TargetId;
 	bLoggedWaitingForStreamer = false;
 	UE_LOG(LogWwisePixelStreaming2, Display, TEXT("Attached Wwise audio producer to Pixel Streaming 2 streamer '%s'."), *TargetId);
 	return true;
 }
 
+bool FWwisePixelStreaming2Bridge::TryAttachRemoteInputBridge()
+{
+	if (!Config.bForwardRemoteInputToAsyncInput || RemoteInputHandler.IsValid())
+	{
+		return true;
+	}
+
+	TSharedPtr<IPixelStreaming2Streamer> TargetStreamer = Streamer.Pin();
+	if (!TargetStreamer)
+	{
+		return false;
+	}
+
+	TSharedPtr<IPixelStreaming2InputHandler> InputHandler = TargetStreamer->GetInputHandler().Pin();
+	if (!InputHandler)
+	{
+		if (!bLoggedWaitingForInputHandler)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Waiting for Pixel Streaming 2 input handler on streamer '%s'."), *AttachedStreamerId);
+			bLoggedWaitingForInputHandler = true;
+		}
+		return false;
+	}
+
+	static const TCHAR* MessageTypes[] =
+	{
+		TEXT("KeyDown"),
+		TEXT("KeyUp"),
+		TEXT("MouseDown"),
+		TEXT("MouseUp"),
+	};
+
+	for (const TCHAR* MessageType : MessageTypes)
+	{
+		IPixelStreaming2InputHandler::MessageHandlerFn OriginalHandler = InputHandler->FindMessageHandler(MessageType);
+		if (!OriginalHandler)
+		{
+			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Pixel Streaming 2 message handler '%s' is unavailable."), MessageType);
+			continue;
+		}
+
+		OriginalInputHandlers.Add(MessageType, OriginalHandler);
+		const FString StreamerId = AttachedStreamerId;
+		InputHandler->RegisterMessageHandler(MessageType,
+			[OriginalHandler = MoveTemp(OriginalHandler), StreamerId](FString SourceId, FMemoryReader Message) mutable
+			{
+				FAsyncInputRemoteContextScope RemoteInputScope(StreamerId, SourceId);
+				OriginalHandler(MoveTemp(SourceId), MoveTemp(Message));
+			});
+	}
+
+	if (OriginalInputHandlers.IsEmpty())
+	{
+		return false;
+	}
+
+	RemoteInputHandler = InputHandler;
+	bLoggedWaitingForInputHandler = false;
+	if (!ClosedConnectionHandle.IsValid())
+	{
+		ClosedConnectionHandle = UPixelStreaming2Delegates::Get()->OnClosedConnectionNative.AddRaw(
+			this,
+			&FWwisePixelStreaming2Bridge::HandleClosedConnection);
+	}
+
+	UE_LOG(LogWwisePixelStreaming2, Display,
+		TEXT("Attached remote input forwarding for %d Pixel Streaming 2 message handlers on streamer '%s'."),
+		OriginalInputHandlers.Num(),
+		*AttachedStreamerId);
+	return true;
+}
+
+void FWwisePixelStreaming2Bridge::DetachRemoteInputBridge()
+{
+	if (ClosedConnectionHandle.IsValid())
+	{
+		UPixelStreaming2Delegates::Get()->OnClosedConnectionNative.Remove(ClosedConnectionHandle);
+		ClosedConnectionHandle.Reset();
+	}
+
+	if (TSharedPtr<IPixelStreaming2InputHandler> InputHandler = RemoteInputHandler.Pin())
+	{
+		for (const TPair<FString, IPixelStreaming2InputHandler::MessageHandlerFn>& Pair : OriginalInputHandlers)
+		{
+			InputHandler->RegisterMessageHandler(Pair.Key, Pair.Value);
+		}
+	}
+
+	if (!AttachedStreamerId.IsEmpty())
+	{
+		FAsyncInputRemoteBridge::NotifyStreamerDisconnected(AttachedStreamerId);
+	}
+	OriginalInputHandlers.Empty();
+	RemoteInputHandler.Reset();
+	bLoggedWaitingForInputHandler = false;
+}
+
+void FWwisePixelStreaming2Bridge::HandleClosedConnection(FString StreamerId, FString PlayerId)
+{
+	if (Config.bForwardRemoteInputToAsyncInput && StreamerId == AttachedStreamerId)
+	{
+		FAsyncInputRemoteBridge::NotifySessionDisconnected(StreamerId, PlayerId);
+	}
+}
+
 void FWwisePixelStreaming2Bridge::DetachStreamer()
 {
+	DetachRemoteInputBridge();
 	if (TSharedPtr<IPixelStreaming2Streamer> TargetStreamer = Streamer.Pin())
 	{
 		TargetStreamer->RemoveAudioProducer(Producer);
 	}
 	Streamer.Reset();
+	AttachedStreamerId.Reset();
 }
 
 void FWwisePixelStreaming2Bridge::ApplyGain(float* Data, int32 NumSamples) const

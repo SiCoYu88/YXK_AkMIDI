@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0.0",
 	"FriendlyName": "Wwise Pixel Streaming 2",
-	"Description": "Routes the Wwise output mix into Pixel Streaming 2.",
+	"Description": "Routes the Wwise output mix and remote input into Pixel Streaming 2 integrations.",
 	"Category": "Audio",
 	"CreatedBy": "YXK",
 	"EnabledByDefault": true,
@@ -24,6 +24,10 @@
 		},
 		{
 			"Name": "PixelStreaming2",
+			"Enabled": true
+		},
+		{
+			"Name": "AsyncInputSystem",
 			"Enabled": true
 		}
 	]

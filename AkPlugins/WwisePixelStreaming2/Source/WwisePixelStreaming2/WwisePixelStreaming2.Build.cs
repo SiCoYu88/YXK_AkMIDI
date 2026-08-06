@@ -16,9 +16,11 @@ public class WwisePixelStreaming2 : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"AkAudio",
+			"AsyncInputSystem",
 			"CoreUObject",
 			"Engine",
 			"PixelStreaming2",
+			"PixelStreaming2Input",
 			"Projects"
 		});
 	}
