@@ -62,4 +62,6 @@ Registered Wwise capture callback for OutputDeviceId=0 at 48000 Hz.
 
 插件只在目标 Streamer 就绪后注册 Wwise Capture Callback，避免绑定到启动阶段的临时主输出。如果 Wwise 替换或重建输出导致回调停滞，插件会自动重绑；`Rebinds` 表示成功重绑次数，`LastCaptureAge` 表示距离最后一次回调的秒数。也可执行 `WwisePixelStreaming2.RebindCapture` 强制立即重绑。
 
+编辑器或游戏退出时，插件会在 `OnEnginePreExit` 阶段提前注销 Pixel Streaming 2 委托、恢复输入处理器并停止 Wwise 捕获。正常退出日志应包含 `Stopped during engine pre-exit`，且不应出现 `Failed to unregister Wwise capture callback` 或 `DetachRemoteInputBridge` 访问冲突。
+
 可将 `PixelStreaming2.DumpDebugAudio` 设为 `1`，播放一段声音后设回 `0`，让 Pixel Streaming 2 写出混音 WAV，以区分服务端混音与浏览器播放问题。

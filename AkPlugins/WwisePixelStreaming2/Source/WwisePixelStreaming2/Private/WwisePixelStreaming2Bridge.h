@@ -4,6 +4,7 @@
 #include "HAL/Runnable.h"
 #include "IPixelStreaming2AudioProducer.h"
 #include "IPixelStreaming2InputHandler.h"
+#include "UObject/WeakObjectPtr.h"
 #include "AK/SoundEngine/Common/AkCallbackTypes.h"
 
 #include <atomic>
@@ -13,6 +14,7 @@
 
 class FAkAudioDevice;
 class IPixelStreaming2Streamer;
+class UPixelStreaming2Delegates;
 
 class FWwisePixelStreaming2Producer final : public IPixelStreaming2AudioProducer
 {
@@ -69,6 +71,7 @@ private:
 	TSharedPtr<FWwisePixelStreaming2Producer> Producer;
 	TWeakPtr<IPixelStreaming2Streamer> Streamer;
 	TWeakPtr<IPixelStreaming2InputHandler> RemoteInputHandler;
+	TWeakObjectPtr<UPixelStreaming2Delegates> PixelStreamingDelegates;
 	TMap<FString, IPixelStreaming2InputHandler::MessageHandlerFn> OriginalInputHandlers;
 	FString AttachedStreamerId;
 	FDelegateHandle ClosedConnectionHandle;

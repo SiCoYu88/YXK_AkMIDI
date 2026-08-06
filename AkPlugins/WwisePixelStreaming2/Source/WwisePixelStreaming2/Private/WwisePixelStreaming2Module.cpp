@@ -3,6 +3,7 @@
 #include "WwisePixelStreaming2Bridge.h"
 #include "Containers/Ticker.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/CoreDelegates.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWwisePixelStreaming2Module, Log, All);
 
@@ -39,6 +40,9 @@ public:
 			return;
 		}
 		BridgeInactiveReason.Reset();
+		EnginePreExitHandle = FCoreDelegates::OnEnginePreExit.AddRaw(
+			this,
+			&FWwisePixelStreaming2Module::HandleEnginePreExit);
 
 		UE_LOG(LogWwisePixelStreaming2Module, Display,
 			TEXT("Plugin started. StreamerId='%s' OutputDeviceId=%llu QueueSlots=%d MaxFrames=%d MaxChannels=%d Gain=%.3f CaptureStallTimeout=%.2fs"),
@@ -59,21 +63,12 @@ public:
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("WwisePixelStreaming2.Status"), false);
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("WwisePixelStreaming2.RebindCapture"), false);
-		if (TickerHandle.IsValid())
+		if (EnginePreExitHandle.IsValid())
 		{
-			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
-			TickerHandle.Reset();
+			FCoreDelegates::OnEnginePreExit.Remove(EnginePreExitHandle);
+			EnginePreExitHandle.Reset();
 		}
-
-		if (Bridge)
-		{
-			const FWwisePixelStreaming2Stats Stats = Bridge->GetStats();
-			Bridge->StopBridge();
-			UE_LOG(LogWwisePixelStreaming2Module, Log,
-				TEXT("Stopped. Captured=%llu Pushed=%llu Dropped=%llu Rejected=%llu"),
-				Stats.CapturedBuffers, Stats.PushedBuffers, Stats.DroppedBuffers, Stats.RejectedBuffers);
-			Bridge.Reset();
-		}
+		ShutdownBridge(TEXT("module shutdown"));
 	}
 
 	virtual FWwisePixelStreaming2Stats GetStats() const override
@@ -95,6 +90,35 @@ public:
 	}
 
 private:
+	void HandleEnginePreExit()
+	{
+		ShutdownBridge(TEXT("engine pre-exit"));
+	}
+
+	void ShutdownBridge(const TCHAR* Reason)
+	{
+		if (TickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
+			TickerHandle.Reset();
+		}
+
+		if (Bridge)
+		{
+			const FWwisePixelStreaming2Stats Stats = Bridge->GetStats();
+			Bridge->StopBridge();
+			UE_LOG(LogWwisePixelStreaming2Module, Log,
+				TEXT("Stopped during %s. Captured=%llu Pushed=%llu Dropped=%llu Rejected=%llu"),
+				Reason,
+				Stats.CapturedBuffers,
+				Stats.PushedBuffers,
+				Stats.DroppedBuffers,
+				Stats.RejectedBuffers);
+			Bridge.Reset();
+			BridgeInactiveReason = FString::Printf(TEXT("stopped during %s"), Reason);
+		}
+	}
+
 	bool Tick(float DeltaTime)
 	{
 		Bridge->TryInitialize();
@@ -127,6 +151,7 @@ private:
 
 	TUniquePtr<FWwisePixelStreaming2Bridge> Bridge;
 	FTSTicker::FDelegateHandle TickerHandle;
+	FDelegateHandle EnginePreExitHandle;
 	float StatusLogElapsedSeconds = 0.0f;
 	FString BridgeInactiveReason = TEXT("module startup has not completed");
 };

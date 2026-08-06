@@ -100,12 +100,27 @@ void FWwisePixelStreaming2Bridge::StopBridge()
 	}
 
 	bAcceptCallbacks.store(false, std::memory_order_release);
-	if (bCaptureRegistered && WwiseDevice != nullptr && FModuleManager::Get().IsModuleLoaded(TEXT("AkAudio")))
+	const bool bCanUnregisterCapture = bCaptureRegistered
+		&& WwiseDevice != nullptr
+		&& FModuleManager::Get().IsModuleLoaded(TEXT("AkAudio"))
+		&& FAkAudioDevice::IsInitialized();
+	if (bCanUnregisterCapture)
 	{
 		const AKRESULT Result = WwiseDevice->UnregisterCaptureCallback(&CaptureCallback, RegisteredOutputId, this);
 		if (Result != AK_Success)
 		{
-			UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Failed to unregister Wwise capture callback (AKRESULT %d)."), static_cast<int32>(Result));
+			if (IsEngineExitRequested())
+			{
+				UE_LOG(LogWwisePixelStreaming2, Verbose,
+					TEXT("Wwise capture callback was already unavailable during engine exit (AKRESULT %d)."),
+					static_cast<int32>(Result));
+			}
+			else
+			{
+				UE_LOG(LogWwisePixelStreaming2, Warning,
+					TEXT("Failed to unregister Wwise capture callback (AKRESULT %d)."),
+					static_cast<int32>(Result));
+			}
 		}
 	}
 	bCaptureRegistered = false;
@@ -489,6 +504,11 @@ bool FWwisePixelStreaming2Bridge::TryAttachRemoteInputBridge()
 	{
 		return false;
 	}
+	UPixelStreaming2Delegates* Delegates = UPixelStreaming2Delegates::Get();
+	if (Delegates == nullptr)
+	{
+		return false;
+	}
 
 	TSharedPtr<IPixelStreaming2InputHandler> InputHandler = TargetStreamer->GetInputHandler().Pin();
 	if (!InputHandler)
@@ -534,10 +554,11 @@ bool FWwisePixelStreaming2Bridge::TryAttachRemoteInputBridge()
 	}
 
 	RemoteInputHandler = InputHandler;
+	PixelStreamingDelegates = Delegates;
 	bLoggedWaitingForInputHandler = false;
 	if (!ClosedConnectionHandle.IsValid())
 	{
-		ClosedConnectionHandle = UPixelStreaming2Delegates::Get()->OnClosedConnectionNative.AddRaw(
+		ClosedConnectionHandle = Delegates->OnClosedConnectionNative.AddRaw(
 			this,
 			&FWwisePixelStreaming2Bridge::HandleClosedConnection);
 	}
@@ -553,9 +574,13 @@ void FWwisePixelStreaming2Bridge::DetachRemoteInputBridge()
 {
 	if (ClosedConnectionHandle.IsValid())
 	{
-		UPixelStreaming2Delegates::Get()->OnClosedConnectionNative.Remove(ClosedConnectionHandle);
+		if (UPixelStreaming2Delegates* Delegates = PixelStreamingDelegates.Get())
+		{
+			Delegates->OnClosedConnectionNative.Remove(ClosedConnectionHandle);
+		}
 		ClosedConnectionHandle.Reset();
 	}
+	PixelStreamingDelegates.Reset();
 
 	if (TSharedPtr<IPixelStreaming2InputHandler> InputHandler = RemoteInputHandler.Pin())
 	{
