@@ -10,8 +10,10 @@ struct FWwisePixelStreaming2Stats
 	uint64 DroppedBuffers = 0;
 	uint64 RejectedBuffers = 0;
 	uint64 NonSilentBuffers = 0;
+	uint64 CaptureRebinds = 0;
 	float LastPeak = 0.0f;
 	float MaxPeak = 0.0f;
+	double SecondsSinceLastCapture = 0.0;
 	int32 LastNumFrames = 0;
 	int32 LastNumChannels = 0;
 	int32 LastSampleRate = 0;

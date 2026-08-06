@@ -4,6 +4,7 @@
 #include "HAL/Event.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/RunnableThread.h"
 #include "IPixelStreaming2Module.h"
 #include "IPixelStreaming2Streamer.h"
@@ -37,12 +38,17 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	GConfig->GetInt(ConfigSection, TEXT("MaxChannels"), Result.MaxChannels, GGameIni);
 	GConfig->GetFloat(ConfigSection, TEXT("Gain"), Result.Gain, GGameIni);
 	GConfig->GetFloat(ConfigSection, TEXT("StatusLogIntervalSeconds"), Result.StatusLogIntervalSeconds, GGameIni);
+	GConfig->GetFloat(ConfigSection, TEXT("CaptureStallTimeoutSeconds"), Result.CaptureStallTimeoutSeconds, GGameIni);
 
 	Result.QueueSlots = FMath::Clamp(Result.QueueSlots, 2, 64);
 	Result.MaxFrames = FMath::Clamp(Result.MaxFrames, 64, 8192);
 	Result.MaxChannels = FMath::Clamp(Result.MaxChannels, 1, 32);
 	Result.Gain = FMath::Clamp(Result.Gain, 0.0f, 8.0f);
 	Result.StatusLogIntervalSeconds = FMath::Clamp(Result.StatusLogIntervalSeconds, 0.0f, 60.0f);
+	if (Result.CaptureStallTimeoutSeconds > 0.0f)
+	{
+		Result.CaptureStallTimeoutSeconds = FMath::Clamp(Result.CaptureStallTimeoutSeconds, 1.0f, 60.0f);
+	}
 	return Result;
 }
 
@@ -129,14 +135,25 @@ void FWwisePixelStreaming2Bridge::StopBridge()
 
 void FWwisePixelStreaming2Bridge::TryInitialize()
 {
-	if (!bCaptureRegistered)
-	{
-		TryRegisterWwiseCapture();
-	}
 	if (!Streamer.IsValid())
 	{
 		TryAttachStreamer();
 	}
+	if (!Streamer.IsValid())
+	{
+		return;
+	}
+	if (!bCaptureRegistered)
+	{
+		TryRegisterWwiseCapture();
+		return;
+	}
+	TryRecoverStalledCapture();
+}
+
+bool FWwisePixelStreaming2Bridge::RebindCapture()
+{
+	return RebindCaptureInternal(false);
 }
 
 FWwisePixelStreaming2Stats FWwisePixelStreaming2Bridge::GetStats() const
@@ -147,6 +164,7 @@ FWwisePixelStreaming2Stats FWwisePixelStreaming2Bridge::GetStats() const
 	Result.DroppedBuffers = DroppedBuffers.load(std::memory_order_relaxed);
 	Result.RejectedBuffers = RejectedBuffers.load(std::memory_order_relaxed);
 	Result.NonSilentBuffers = NonSilentBuffers.load(std::memory_order_relaxed);
+	Result.CaptureRebinds = CaptureRebinds.load(std::memory_order_relaxed);
 	Result.LastPeak = LastPeak.load(std::memory_order_relaxed);
 	Result.MaxPeak = MaxPeak.load(std::memory_order_relaxed);
 	Result.LastNumFrames = LastNumFrames.load(std::memory_order_relaxed);
@@ -154,6 +172,11 @@ FWwisePixelStreaming2Stats FWwisePixelStreaming2Bridge::GetStats() const
 	Result.LastSampleRate = LastSampleRate.load(std::memory_order_relaxed);
 	Result.bCaptureRegistered = bCaptureRegistered;
 	Result.bStreamerAttached = Streamer.IsValid();
+	const uint64 LastCycles = LastCaptureCycles.load(std::memory_order_relaxed);
+	if (LastCycles != 0)
+	{
+		Result.SecondsSinceLastCapture = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - LastCycles);
+	}
 	return Result;
 }
 
@@ -170,8 +193,8 @@ void FWwisePixelStreaming2Bridge::LogStatus() const
 
 	UE_LOG(LogWwisePixelStreaming2, Display,
 		TEXT("Status: CaptureRegistered=%s StreamerAttached=%s StreamerId='%s' OutputDeviceId=%llu "
-			"Captured=%llu Pushed=%llu Dropped=%llu Rejected=%llu NonSilent=%llu "
-			"LastPeak=%.6f MaxPeak=%.6f Format=%d frames x %d channels @ %d Hz "
+			"Captured=%llu Pushed=%llu Dropped=%llu Rejected=%llu NonSilent=%llu Rebinds=%llu "
+			"LastPeak=%.6f MaxPeak=%.6f LastCaptureAge=%.2fs Format=%d frames x %d channels @ %d Hz "
 			"Gain=%.3f PS2DisableTransmitAudio=%d PS2AudioGain=%.3f"),
 		Stats.bCaptureRegistered ? TEXT("true") : TEXT("false"),
 		Stats.bStreamerAttached ? TEXT("true") : TEXT("false"),
@@ -182,8 +205,10 @@ void FWwisePixelStreaming2Bridge::LogStatus() const
 		Stats.DroppedBuffers,
 		Stats.RejectedBuffers,
 		Stats.NonSilentBuffers,
+		Stats.CaptureRebinds,
 		Stats.LastPeak,
 		Stats.MaxPeak,
+		Stats.SecondsSinceLastCapture,
 		Stats.LastNumFrames,
 		Stats.LastNumChannels,
 		Stats.LastSampleRate,
@@ -263,6 +288,7 @@ void FWwisePixelStreaming2Bridge::CaptureCallback(AkAudioBuffer& CaptureBuffer, 
 
 void FWwisePixelStreaming2Bridge::OnCapturedAudio(AkAudioBuffer& CaptureBuffer)
 {
+	LastCaptureCycles.store(FPlatformTime::Cycles64(), std::memory_order_relaxed);
 	const int32 NumFrames = static_cast<int32>(CaptureBuffer.uValidFrames);
 	const int32 NumChannels = static_cast<int32>(CaptureBuffer.NumChannels());
 	const float* Data = static_cast<const float*>(CaptureBuffer.GetInterleavedData());
@@ -327,6 +353,7 @@ bool FWwisePixelStreaming2Bridge::TryRegisterWwiseCapture()
 
 	bAcceptCallbacks.store(true, std::memory_order_release);
 	bCaptureRegistered = true;
+	LastCaptureCycles.store(FPlatformTime::Cycles64(), std::memory_order_relaxed);
 	bLoggedWaitingForWwise = false;
 	LastCaptureRegistrationError = INDEX_NONE;
 	UE_LOG(LogWwisePixelStreaming2, Display,
@@ -334,6 +361,72 @@ bool FWwisePixelStreaming2Bridge::TryRegisterWwiseCapture()
 		Config.OutputDeviceId,
 		SampleRate);
 	return true;
+}
+
+bool FWwisePixelStreaming2Bridge::RebindCaptureInternal(bool bAutomatic)
+{
+	const TCHAR* Reason = bAutomatic ? TEXT("capture watchdog") : TEXT("console command");
+	bAcceptCallbacks.store(false, std::memory_order_release);
+
+	if (bCaptureRegistered && WwiseDevice != nullptr && FModuleManager::Get().IsModuleLoaded(TEXT("AkAudio")))
+	{
+		const AKRESULT UnregisterResult = WwiseDevice->UnregisterCaptureCallback(&CaptureCallback, RegisteredOutputId, this);
+		if (UnregisterResult != AK_Success && UnregisterResult != AK_DeviceNotFound && UnregisterResult != AK_NotInitialized)
+		{
+			bAcceptCallbacks.store(true, std::memory_order_release);
+			LastCaptureCycles.store(FPlatformTime::Cycles64(), std::memory_order_relaxed);
+			UE_LOG(LogWwisePixelStreaming2, Error,
+				TEXT("Capture rebind requested by %s, but unregister failed (AKRESULT %d)."),
+				Reason,
+				static_cast<int32>(UnregisterResult));
+			return false;
+		}
+	}
+
+	while (ActiveCallbacks.load(std::memory_order_acquire) != 0)
+	{
+		FPlatformProcess::YieldThread();
+	}
+
+	bCaptureRegistered = false;
+	WwiseDevice = nullptr;
+	if (!TryRegisterWwiseCapture())
+	{
+		UE_LOG(LogWwisePixelStreaming2, Warning, TEXT("Capture rebind requested by %s is waiting for Wwise output."), Reason);
+		return false;
+	}
+
+	const uint64 RebindCount = CaptureRebinds.fetch_add(1, std::memory_order_relaxed) + 1;
+	UE_LOG(LogWwisePixelStreaming2, Display,
+		TEXT("Rebound Wwise capture callback to the current output (%s, count=%llu)."),
+		Reason,
+		RebindCount);
+	return true;
+}
+
+void FWwisePixelStreaming2Bridge::TryRecoverStalledCapture()
+{
+	if (Config.CaptureStallTimeoutSeconds <= 0.0f)
+	{
+		return;
+	}
+
+	const uint64 LastCycles = LastCaptureCycles.load(std::memory_order_relaxed);
+	if (LastCycles == 0)
+	{
+		return;
+	}
+
+	const double SecondsSinceLastCapture = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - LastCycles);
+	if (SecondsSinceLastCapture < Config.CaptureStallTimeoutSeconds)
+	{
+		return;
+	}
+
+	UE_LOG(LogWwisePixelStreaming2, Warning,
+		TEXT("No Wwise capture callback for %.2f seconds; rebinding the current output."),
+		SecondsSinceLastCapture);
+	RebindCaptureInternal(true);
 }
 
 bool FWwisePixelStreaming2Bridge::TryAttachStreamer()

@@ -27,6 +27,7 @@ struct FWwisePixelStreaming2Config
 	int32 MaxChannels = 16;
 	float Gain = 1.0f;
 	float StatusLogIntervalSeconds = 5.0f;
+	float CaptureStallTimeoutSeconds = 2.0f;
 
 	static FWwisePixelStreaming2Config Load();
 };
@@ -40,6 +41,7 @@ public:
 	bool Start();
 	void StopBridge();
 	void TryInitialize();
+	bool RebindCapture();
 	FWwisePixelStreaming2Stats GetStats() const;
 	void LogStatus() const;
 	float GetStatusLogIntervalSeconds() const { return Config.StatusLogIntervalSeconds; }
@@ -51,6 +53,8 @@ private:
 	static void CaptureCallback(class AkAudioBuffer& CaptureBuffer, AkOutputDeviceID OutputId, void* Cookie);
 	void OnCapturedAudio(class AkAudioBuffer& CaptureBuffer);
 	bool TryRegisterWwiseCapture();
+	bool RebindCaptureInternal(bool bAutomatic);
+	void TryRecoverStalledCapture();
 	bool TryAttachStreamer();
 	void DetachStreamer();
 	void ApplyGain(float* Data, int32 NumSamples) const;
@@ -74,6 +78,8 @@ private:
 	std::atomic<uint64> DroppedBuffers { 0 };
 	std::atomic<uint64> RejectedBuffers { 0 };
 	std::atomic<uint64> NonSilentBuffers { 0 };
+	std::atomic<uint64> CaptureRebinds { 0 };
+	std::atomic<uint64> LastCaptureCycles { 0 };
 	std::atomic<float> LastPeak { 0.0f };
 	std::atomic<float> MaxPeak { 0.0f };
 	std::atomic<int32> LastNumFrames { 0 };

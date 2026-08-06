@@ -16,6 +16,11 @@ public:
 			TEXT("Log the current Wwise to Pixel Streaming 2 audio bridge status."),
 			FConsoleCommandDelegate::CreateRaw(this, &FWwisePixelStreaming2Module::LogStatusCommand),
 			ECVF_Default);
+		IConsoleManager::Get().RegisterConsoleCommand(
+			TEXT("WwisePixelStreaming2.RebindCapture"),
+			TEXT("Rebind the Wwise capture callback to the current output device."),
+			FConsoleCommandDelegate::CreateRaw(this, &FWwisePixelStreaming2Module::RebindCaptureCommand),
+			ECVF_Default);
 
 		const FWwisePixelStreaming2Config Config = FWwisePixelStreaming2Config::Load();
 		if (!Config.bEnabled)
@@ -36,13 +41,14 @@ public:
 		BridgeInactiveReason.Reset();
 
 		UE_LOG(LogWwisePixelStreaming2Module, Display,
-			TEXT("Plugin started. StreamerId='%s' OutputDeviceId=%llu QueueSlots=%d MaxFrames=%d MaxChannels=%d Gain=%.3f"),
+			TEXT("Plugin started. StreamerId='%s' OutputDeviceId=%llu QueueSlots=%d MaxFrames=%d MaxChannels=%d Gain=%.3f CaptureStallTimeout=%.2fs"),
 			Config.StreamerId.IsEmpty() ? TEXT("<default>") : *Config.StreamerId,
 			Config.OutputDeviceId,
 			Config.QueueSlots,
 			Config.MaxFrames,
 			Config.MaxChannels,
-			Config.Gain);
+			Config.Gain,
+			Config.CaptureStallTimeoutSeconds);
 
 		TickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateRaw(this, &FWwisePixelStreaming2Module::Tick),
@@ -52,6 +58,7 @@ public:
 	virtual void ShutdownModule() override
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(TEXT("WwisePixelStreaming2.Status"), false);
+		IConsoleManager::Get().UnregisterConsoleObject(TEXT("WwisePixelStreaming2.RebindCapture"), false);
 		if (TickerHandle.IsValid())
 		{
 			FTSTicker::GetCoreTicker().RemoveTicker(TickerHandle);
@@ -104,6 +111,18 @@ private:
 	void LogStatusCommand()
 	{
 		LogStatus();
+	}
+
+	void RebindCaptureCommand()
+	{
+		if (!Bridge)
+		{
+			UE_LOG(LogWwisePixelStreaming2Module, Warning,
+				TEXT("Cannot rebind capture because the audio bridge is inactive: %s."),
+				*BridgeInactiveReason);
+			return;
+		}
+		Bridge->RebindCapture();
 	}
 
 	TUniquePtr<FWwisePixelStreaming2Bridge> Bridge;
