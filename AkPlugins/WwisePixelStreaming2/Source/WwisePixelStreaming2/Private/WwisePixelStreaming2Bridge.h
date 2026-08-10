@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "HAL/Runnable.h"
 #include "IPixelStreaming2AudioProducer.h"
 #include "IPixelStreaming2InputHandler.h"
@@ -26,6 +27,7 @@ struct FWwisePixelStreaming2Config
 	bool bForwardRemoteInputToAsyncInput = true;
 	bool bForwardRemoteAnyKeyToAsyncInput = true;
 	FString RemoteAnyKeyName = TEXT("PixelStreamingAnyKey");
+	float RemoteAnyKeyReleaseGraceSeconds = 0.05f;
 	FString StreamerId;
 	uint64 OutputDeviceId = 0;
 	int32 QueueSlots = 8;
@@ -68,7 +70,10 @@ private:
 	void HandleRemoteKeyboardState_GameThread(const FString& SourceId, uint8 KeyCode, bool bPressed);
 	void ReleaseRemoteKeyboardStateForSource_GameThread(const FString& SourceId);
 	void ReleaseAllRemoteKeyboardState_GameThread();
-	void SendRemoteAnyKeyEvent_GameThread(bool bPressed);
+	void ScheduleRemoteAnyKeyRelease_GameThread();
+	void CommitRemoteAnyKeyRelease_GameThread();
+	bool TickRemoteInputState_GameThread(float DeltaTime);
+	bool TrySendRemoteAnyKeyEvent_GameThread(bool bPressed);
 	int32 GetRemotePressedKeyCount() const;
 	void DetachStreamer();
 	void ApplyGain(float* Data, int32 NumSamples) const;
@@ -83,6 +88,7 @@ private:
 	TMap<FString, TSet<uint8>> RemotePressedKeyCodesBySource;
 	FString AttachedStreamerId;
 	FDelegateHandle ClosedConnectionHandle;
+	FTSTicker::FDelegateHandle RemoteInputStateTickerHandle;
 	FAkAudioDevice* WwiseDevice = nullptr;
 	class FRunnableThread* WorkerThread = nullptr;
 	class FEvent* WorkEvent = nullptr;
@@ -111,5 +117,9 @@ private:
 	bool bLoggedWaitingForStreamer = false;
 	bool bLoggedWaitingForInputHandler = false;
 	bool bRemoteAnyKeyPressed = false;
+	bool bRemoteAnyKeyEventForwarded = false;
+	bool bObservedAsyncInputWorldContext = false;
+	TWeakObjectPtr<UObject> LastAsyncInputWorldContext;
+	double RemoteAnyKeyReleaseDeadlineSeconds = -1.0;
 	int32 LastCaptureRegistrationError = INDEX_NONE;
 };

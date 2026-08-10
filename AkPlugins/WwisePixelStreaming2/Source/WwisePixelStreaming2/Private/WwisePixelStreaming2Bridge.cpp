@@ -48,6 +48,7 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	GConfig->GetBool(ConfigSection, TEXT("ForwardRemoteInputToAsyncInput"), Result.bForwardRemoteInputToAsyncInput, GGameIni);
 	GConfig->GetBool(ConfigSection, TEXT("ForwardRemoteAnyKeyToAsyncInput"), Result.bForwardRemoteAnyKeyToAsyncInput, GGameIni);
 	GConfig->GetString(ConfigSection, TEXT("RemoteAnyKeyName"), Result.RemoteAnyKeyName, GGameIni);
+	GConfig->GetFloat(ConfigSection, TEXT("RemoteAnyKeyReleaseGraceSeconds"), Result.RemoteAnyKeyReleaseGraceSeconds, GGameIni);
 	GConfig->GetString(ConfigSection, TEXT("StreamerId"), Result.StreamerId, GGameIni);
 	FString OutputDeviceId;
 	if (GConfig->GetString(ConfigSection, TEXT("OutputDeviceId"), OutputDeviceId, GGameIni))
@@ -66,6 +67,7 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	Result.MaxChannels = FMath::Clamp(Result.MaxChannels, 1, 32);
 	Result.Gain = FMath::Clamp(Result.Gain, 0.0f, 8.0f);
 	Result.StatusLogIntervalSeconds = FMath::Clamp(Result.StatusLogIntervalSeconds, 0.0f, 60.0f);
+	Result.RemoteAnyKeyReleaseGraceSeconds = FMath::Clamp(Result.RemoteAnyKeyReleaseGraceSeconds, 0.0f, 0.5f);
 	if (Result.RemoteAnyKeyName.IsEmpty())
 	{
 		Result.RemoteAnyKeyName = TEXT("PixelStreamingAnyKey");
@@ -108,6 +110,12 @@ bool FWwisePixelStreaming2Bridge::Start()
 		WorkEvent = nullptr;
 		return false;
 	}
+	if (Config.bForwardRemoteInputToAsyncInput && Config.bForwardRemoteAnyKeyToAsyncInput)
+	{
+		RemoteInputStateTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateRaw(this, &FWwisePixelStreaming2Bridge::TickRemoteInputState_GameThread),
+			0.01f);
+	}
 
 	TryInitialize();
 	return true;
@@ -115,6 +123,12 @@ bool FWwisePixelStreaming2Bridge::Start()
 
 void FWwisePixelStreaming2Bridge::StopBridge()
 {
+	if (RemoteInputStateTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RemoteInputStateTickerHandle);
+		RemoteInputStateTickerHandle.Reset();
+	}
+
 	if (WorkerThread == nullptr && !bCaptureRegistered)
 	{
 		DetachStreamer();
@@ -667,6 +681,7 @@ void FWwisePixelStreaming2Bridge::HandleRemoteKeyboardState_GameThread(const FSt
 
 	if (bPressed)
 	{
+		RemoteAnyKeyReleaseDeadlineSeconds = -1.0;
 		RemotePressedKeyCodesBySource.FindOrAdd(SourceId).Add(KeyCode);
 	}
 	else if (TSet<uint8>* PressedKeys = RemotePressedKeyCodesBySource.Find(SourceId))
@@ -682,12 +697,11 @@ void FWwisePixelStreaming2Bridge::HandleRemoteKeyboardState_GameThread(const FSt
 	if (PressedKeyCount > 0 && !bRemoteAnyKeyPressed)
 	{
 		bRemoteAnyKeyPressed = true;
-		SendRemoteAnyKeyEvent_GameThread(true);
+		bRemoteAnyKeyEventForwarded = TrySendRemoteAnyKeyEvent_GameThread(true);
 	}
 	else if (PressedKeyCount == 0 && bRemoteAnyKeyPressed)
 	{
-		bRemoteAnyKeyPressed = false;
-		SendRemoteAnyKeyEvent_GameThread(false);
+		ScheduleRemoteAnyKeyRelease_GameThread();
 	}
 }
 
@@ -705,8 +719,7 @@ void FWwisePixelStreaming2Bridge::ReleaseRemoteKeyboardStateForSource_GameThread
 
 	if (GetRemotePressedKeyCount() == 0 && bRemoteAnyKeyPressed)
 	{
-		bRemoteAnyKeyPressed = false;
-		SendRemoteAnyKeyEvent_GameThread(false);
+		CommitRemoteAnyKeyRelease_GameThread();
 	}
 }
 
@@ -716,28 +729,117 @@ void FWwisePixelStreaming2Bridge::ReleaseAllRemoteKeyboardState_GameThread()
 	{
 		RemotePressedKeyCodesBySource.Empty();
 		bRemoteAnyKeyPressed = false;
+		bRemoteAnyKeyEventForwarded = false;
+		RemoteAnyKeyReleaseDeadlineSeconds = -1.0;
 		return;
 	}
 
 	RemotePressedKeyCodesBySource.Empty();
-	if (bRemoteAnyKeyPressed)
+	CommitRemoteAnyKeyRelease_GameThread();
+}
+
+void FWwisePixelStreaming2Bridge::ScheduleRemoteAnyKeyRelease_GameThread()
+{
+	if (Config.RemoteAnyKeyReleaseGraceSeconds <= 0.0f)
 	{
-		bRemoteAnyKeyPressed = false;
-		SendRemoteAnyKeyEvent_GameThread(false);
+		CommitRemoteAnyKeyRelease_GameThread();
+		return;
+	}
+
+	if (RemoteAnyKeyReleaseDeadlineSeconds < 0.0)
+	{
+		RemoteAnyKeyReleaseDeadlineSeconds = FPlatformTime::Seconds() + Config.RemoteAnyKeyReleaseGraceSeconds;
 	}
 }
 
-void FWwisePixelStreaming2Bridge::SendRemoteAnyKeyEvent_GameThread(bool bPressed)
+void FWwisePixelStreaming2Bridge::CommitRemoteAnyKeyRelease_GameThread()
+{
+	RemoteAnyKeyReleaseDeadlineSeconds = -1.0;
+	if (!bRemoteAnyKeyPressed)
+	{
+		return;
+	}
+
+	bRemoteAnyKeyPressed = false;
+	if (bRemoteAnyKeyEventForwarded)
+	{
+		TrySendRemoteAnyKeyEvent_GameThread(false);
+	}
+	bRemoteAnyKeyEventForwarded = false;
+}
+
+bool FWwisePixelStreaming2Bridge::TickRemoteInputState_GameThread(float DeltaTime)
+{
+	(void)DeltaTime;
+	if (!ensureMsgf(IsInGameThread(), TEXT("Remote keyboard aggregate state must be ticked on the GameThread.")))
+	{
+		return true;
+	}
+
+	if (RemoteAnyKeyReleaseDeadlineSeconds >= 0.0
+		&& FPlatformTime::Seconds() >= RemoteAnyKeyReleaseDeadlineSeconds)
+	{
+		if (GetRemotePressedKeyCount() == 0)
+		{
+			CommitRemoteAnyKeyRelease_GameThread();
+		}
+		else
+		{
+			RemoteAnyKeyReleaseDeadlineSeconds = -1.0;
+		}
+	}
+
+	UAsyncInputSubsystem* AsyncInputSubsystem = UAsyncInputSubsystem::Get();
+	UObject* CurrentWorldContext = AsyncInputSubsystem != nullptr
+		? AsyncInputSubsystem->WorldContextObject.Get()
+		: nullptr;
+	if (CurrentWorldContext == nullptr)
+	{
+		if (bObservedAsyncInputWorldContext)
+		{
+			bObservedAsyncInputWorldContext = false;
+			LastAsyncInputWorldContext.Reset();
+			bRemoteAnyKeyEventForwarded = false;
+		}
+	}
+	else
+	{
+		const bool bWorldContextChanged = !bObservedAsyncInputWorldContext
+			|| LastAsyncInputWorldContext.Get() != CurrentWorldContext;
+		if (bWorldContextChanged)
+		{
+			bObservedAsyncInputWorldContext = true;
+			LastAsyncInputWorldContext = CurrentWorldContext;
+			bRemoteAnyKeyEventForwarded = false;
+		}
+
+		if (bRemoteAnyKeyPressed
+			&& GetRemotePressedKeyCount() > 0
+			&& !bRemoteAnyKeyEventForwarded)
+		{
+			bRemoteAnyKeyEventForwarded = TrySendRemoteAnyKeyEvent_GameThread(true);
+		}
+	}
+
+	return true;
+}
+
+bool FWwisePixelStreaming2Bridge::TrySendRemoteAnyKeyEvent_GameThread(bool bPressed)
 {
 	if (!ensureMsgf(IsInGameThread(), TEXT("Remote any-key event must be sent on the GameThread.")))
 	{
-		return;
+		return false;
 	}
 
 	UAsyncInputSubsystem* AsyncInputSubsystem = UAsyncInputSubsystem::Get();
 	if (AsyncInputSubsystem == nullptr)
 	{
-		return;
+		return false;
+	}
+	if (UObject* CurrentWorldContext = AsyncInputSubsystem->WorldContextObject.Get())
+	{
+		bObservedAsyncInputWorldContext = true;
+		LastAsyncInputWorldContext = CurrentWorldContext;
 	}
 
 	FAsyncInputTouchEvent AnyKeyEvent(
@@ -746,6 +848,7 @@ void FWwisePixelStreaming2Bridge::SendRemoteAnyKeyEvent_GameThread(bool bPressed
 		bPressed ? EAsyncInputTouchType::KeyStart : EAsyncInputTouchType::KeyEnd);
 	AnyKeyEvent.SetRemoteSource(AttachedStreamerId, RemoteAnyKeySyntheticSourceId);
 	AsyncInputSubsystem->NotifyAsyncInputEvent_GameThread(AnyKeyEvent);
+	return true;
 }
 
 int32 FWwisePixelStreaming2Bridge::GetRemotePressedKeyCount() const
