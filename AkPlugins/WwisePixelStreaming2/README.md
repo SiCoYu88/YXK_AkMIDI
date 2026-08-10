@@ -20,6 +20,8 @@
 [WwisePixelStreaming2]
 Enabled=true
 ForwardRemoteInputToAsyncInput=true
+ForwardRemoteAnyKeyToAsyncInput=true
+RemoteAnyKeyName=PixelStreamingAnyKey
 StreamerId=
 OutputDeviceId=0
 QueueSlots=8
@@ -32,6 +34,7 @@ CaptureStallTimeoutSeconds=2.0
 
 - `StreamerId` 为空时使用 Pixel Streaming 2 默认 Streamer。
 - `ForwardRemoteInputToAsyncInput=true` 时，远程键鼠事件会旁路复制给 `AsyncInputSystem`；Pixel Streaming 2 原输入处理保持不变。
+- `ForwardRemoteAnyKeyToAsyncInput=true` 时，任意远端键盘按下会额外产生 `RemoteAnyKeyName` 虚拟键；只要至少一个远端键仍按下，该虚拟键保持 pressed。
 - `OutputDeviceId=0` 表示 Wwise 主输出；其他值使用 `AddOutput` 或 `GetOutputID` 返回的设备 ID。
 - 队列满时丢弃最新缓冲区，绝不阻塞 Wwise 实时音频线程。
 - `MaxFrames` 或 `MaxChannels` 小于实际 Wwise 输出时，对应缓冲区会被拒绝。

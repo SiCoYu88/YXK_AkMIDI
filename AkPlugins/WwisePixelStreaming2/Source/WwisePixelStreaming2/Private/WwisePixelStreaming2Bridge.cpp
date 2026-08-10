@@ -1,6 +1,7 @@
 #include "WwisePixelStreaming2Bridge.h"
 
 #include "AkAudioDevice.h"
+#include "AsyncInputSubsystem.h"
 #include "AsyncInputRemoteBridge.h"
 #include "HAL/Event.h"
 #include "HAL/IConsoleManager.h"
@@ -18,6 +19,21 @@ DEFINE_LOG_CATEGORY_STATIC(LogWwisePixelStreaming2, Log, All);
 namespace
 {
 	constexpr TCHAR ConfigSection[] = TEXT("WwisePixelStreaming2");
+	constexpr TCHAR RemoteAnyKeySyntheticSourceId[] = TEXT("__WwisePixelStreamingAnyKey");
+	constexpr uint32 RemoteAnyKeyTouchIndex = 0;
+
+	bool TryPeekPixelStreamingKeyCode(FMemoryReader& Message, uint8& OutKeyCode)
+	{
+		const int64 OriginalOffset = Message.Tell();
+		if (Message.TotalSize() - OriginalOffset < static_cast<int64>(sizeof(uint8)))
+		{
+			return false;
+		}
+
+		Message << OutKeyCode;
+		Message.Seek(OriginalOffset);
+		return !Message.IsError();
+	}
 }
 
 FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
@@ -30,6 +46,8 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 
 	GConfig->GetBool(ConfigSection, TEXT("Enabled"), Result.bEnabled, GGameIni);
 	GConfig->GetBool(ConfigSection, TEXT("ForwardRemoteInputToAsyncInput"), Result.bForwardRemoteInputToAsyncInput, GGameIni);
+	GConfig->GetBool(ConfigSection, TEXT("ForwardRemoteAnyKeyToAsyncInput"), Result.bForwardRemoteAnyKeyToAsyncInput, GGameIni);
+	GConfig->GetString(ConfigSection, TEXT("RemoteAnyKeyName"), Result.RemoteAnyKeyName, GGameIni);
 	GConfig->GetString(ConfigSection, TEXT("StreamerId"), Result.StreamerId, GGameIni);
 	FString OutputDeviceId;
 	if (GConfig->GetString(ConfigSection, TEXT("OutputDeviceId"), OutputDeviceId, GGameIni))
@@ -48,6 +66,10 @@ FWwisePixelStreaming2Config FWwisePixelStreaming2Config::Load()
 	Result.MaxChannels = FMath::Clamp(Result.MaxChannels, 1, 32);
 	Result.Gain = FMath::Clamp(Result.Gain, 0.0f, 8.0f);
 	Result.StatusLogIntervalSeconds = FMath::Clamp(Result.StatusLogIntervalSeconds, 0.0f, 60.0f);
+	if (Result.RemoteAnyKeyName.IsEmpty())
+	{
+		Result.RemoteAnyKeyName = TEXT("PixelStreamingAnyKey");
+	}
 	if (Result.CaptureStallTimeoutSeconds > 0.0f)
 	{
 		Result.CaptureStallTimeoutSeconds = FMath::Clamp(Result.CaptureStallTimeoutSeconds, 1.0f, 60.0f);
@@ -540,11 +562,29 @@ bool FWwisePixelStreaming2Bridge::TryAttachRemoteInputBridge()
 
 		OriginalInputHandlers.Add(MessageType, OriginalHandler);
 		const FString StreamerId = AttachedStreamerId;
+		const FString MessageTypeString(MessageType);
 		InputHandler->RegisterMessageHandler(MessageType,
-			[OriginalHandler = MoveTemp(OriginalHandler), StreamerId](FString SourceId, FMemoryReader Message) mutable
+			[this, OriginalHandler = MoveTemp(OriginalHandler), StreamerId, MessageTypeString](FString SourceId, FMemoryReader Message) mutable
 			{
+				const bool bKeyDownMessage = MessageTypeString == TEXT("KeyDown");
+				const bool bKeyUpMessage = MessageTypeString == TEXT("KeyUp");
+				const FString RemoteSourceId = SourceId;
+				uint8 KeyCode = 0;
+				const bool bHasKeyCode = (bKeyDownMessage || bKeyUpMessage)
+					&& TryPeekPixelStreamingKeyCode(Message, KeyCode);
+
+				if (bKeyDownMessage && bHasKeyCode)
+				{
+					HandleRemoteKeyboardState_GameThread(RemoteSourceId, KeyCode, true);
+				}
+
 				FAsyncInputRemoteContextScope RemoteInputScope(StreamerId, SourceId);
 				OriginalHandler(MoveTemp(SourceId), MoveTemp(Message));
+
+				if (bKeyUpMessage && bHasKeyCode)
+				{
+					HandleRemoteKeyboardState_GameThread(RemoteSourceId, KeyCode, false);
+				}
 			});
 	}
 
@@ -582,6 +622,8 @@ void FWwisePixelStreaming2Bridge::DetachRemoteInputBridge()
 	}
 	PixelStreamingDelegates.Reset();
 
+	ReleaseAllRemoteKeyboardState_GameThread();
+
 	if (TSharedPtr<IPixelStreaming2InputHandler> InputHandler = RemoteInputHandler.Pin())
 	{
 		for (const TPair<FString, IPixelStreaming2InputHandler::MessageHandlerFn>& Pair : OriginalInputHandlers)
@@ -603,8 +645,117 @@ void FWwisePixelStreaming2Bridge::HandleClosedConnection(FString StreamerId, FSt
 {
 	if (Config.bForwardRemoteInputToAsyncInput && StreamerId == AttachedStreamerId)
 	{
+		ReleaseRemoteKeyboardStateForSource_GameThread(PlayerId);
 		FAsyncInputRemoteBridge::NotifySessionDisconnected(StreamerId, PlayerId);
 	}
+}
+
+void FWwisePixelStreaming2Bridge::HandleRemoteKeyboardState_GameThread(const FString& SourceId, uint8 KeyCode, bool bPressed)
+{
+	if (!Config.bForwardRemoteInputToAsyncInput
+		|| !Config.bForwardRemoteAnyKeyToAsyncInput
+		|| Config.RemoteAnyKeyName.IsEmpty()
+		|| AttachedStreamerId.IsEmpty())
+	{
+		return;
+	}
+
+	if (!ensureMsgf(IsInGameThread(), TEXT("Remote keyboard aggregate state must be updated on the GameThread.")))
+	{
+		return;
+	}
+
+	if (bPressed)
+	{
+		RemotePressedKeyCodesBySource.FindOrAdd(SourceId).Add(KeyCode);
+	}
+	else if (TSet<uint8>* PressedKeys = RemotePressedKeyCodesBySource.Find(SourceId))
+	{
+		PressedKeys->Remove(KeyCode);
+		if (PressedKeys->IsEmpty())
+		{
+			RemotePressedKeyCodesBySource.Remove(SourceId);
+		}
+	}
+
+	const int32 PressedKeyCount = GetRemotePressedKeyCount();
+	if (PressedKeyCount > 0 && !bRemoteAnyKeyPressed)
+	{
+		bRemoteAnyKeyPressed = true;
+		SendRemoteAnyKeyEvent_GameThread(true);
+	}
+	else if (PressedKeyCount == 0 && bRemoteAnyKeyPressed)
+	{
+		bRemoteAnyKeyPressed = false;
+		SendRemoteAnyKeyEvent_GameThread(false);
+	}
+}
+
+void FWwisePixelStreaming2Bridge::ReleaseRemoteKeyboardStateForSource_GameThread(const FString& SourceId)
+{
+	if (!ensureMsgf(IsInGameThread(), TEXT("Remote keyboard aggregate state must be released on the GameThread.")))
+	{
+		return;
+	}
+
+	if (!RemotePressedKeyCodesBySource.Remove(SourceId))
+	{
+		return;
+	}
+
+	if (GetRemotePressedKeyCount() == 0 && bRemoteAnyKeyPressed)
+	{
+		bRemoteAnyKeyPressed = false;
+		SendRemoteAnyKeyEvent_GameThread(false);
+	}
+}
+
+void FWwisePixelStreaming2Bridge::ReleaseAllRemoteKeyboardState_GameThread()
+{
+	if (!ensureMsgf(IsInGameThread(), TEXT("Remote keyboard aggregate state must be released on the GameThread.")))
+	{
+		RemotePressedKeyCodesBySource.Empty();
+		bRemoteAnyKeyPressed = false;
+		return;
+	}
+
+	RemotePressedKeyCodesBySource.Empty();
+	if (bRemoteAnyKeyPressed)
+	{
+		bRemoteAnyKeyPressed = false;
+		SendRemoteAnyKeyEvent_GameThread(false);
+	}
+}
+
+void FWwisePixelStreaming2Bridge::SendRemoteAnyKeyEvent_GameThread(bool bPressed)
+{
+	if (!ensureMsgf(IsInGameThread(), TEXT("Remote any-key event must be sent on the GameThread.")))
+	{
+		return;
+	}
+
+	UAsyncInputSubsystem* AsyncInputSubsystem = UAsyncInputSubsystem::Get();
+	if (AsyncInputSubsystem == nullptr)
+	{
+		return;
+	}
+
+	FAsyncInputTouchEvent AnyKeyEvent(
+		RemoteAnyKeyTouchIndex,
+		Config.RemoteAnyKeyName,
+		bPressed ? EAsyncInputTouchType::KeyStart : EAsyncInputTouchType::KeyEnd);
+	AnyKeyEvent.SetRemoteSource(AttachedStreamerId, RemoteAnyKeySyntheticSourceId);
+	AsyncInputSubsystem->NotifyAsyncInputEvent_GameThread(AnyKeyEvent);
+}
+
+int32 FWwisePixelStreaming2Bridge::GetRemotePressedKeyCount() const
+{
+	int32 Count = 0;
+	for (const TPair<FString, TSet<uint8>>& Pair : RemotePressedKeyCodesBySource)
+	{
+		Count += Pair.Value.Num();
+	}
+	return Count;
 }
 
 void FWwisePixelStreaming2Bridge::DetachStreamer()

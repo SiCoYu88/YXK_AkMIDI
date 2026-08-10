@@ -24,6 +24,8 @@ struct FWwisePixelStreaming2Config
 {
 	bool bEnabled = true;
 	bool bForwardRemoteInputToAsyncInput = true;
+	bool bForwardRemoteAnyKeyToAsyncInput = true;
+	FString RemoteAnyKeyName = TEXT("PixelStreamingAnyKey");
 	FString StreamerId;
 	uint64 OutputDeviceId = 0;
 	int32 QueueSlots = 8;
@@ -63,6 +65,11 @@ private:
 	bool TryAttachRemoteInputBridge();
 	void DetachRemoteInputBridge();
 	void HandleClosedConnection(FString StreamerId, FString PlayerId);
+	void HandleRemoteKeyboardState_GameThread(const FString& SourceId, uint8 KeyCode, bool bPressed);
+	void ReleaseRemoteKeyboardStateForSource_GameThread(const FString& SourceId);
+	void ReleaseAllRemoteKeyboardState_GameThread();
+	void SendRemoteAnyKeyEvent_GameThread(bool bPressed);
+	int32 GetRemotePressedKeyCount() const;
 	void DetachStreamer();
 	void ApplyGain(float* Data, int32 NumSamples) const;
 
@@ -73,6 +80,7 @@ private:
 	TWeakPtr<IPixelStreaming2InputHandler> RemoteInputHandler;
 	TWeakObjectPtr<UPixelStreaming2Delegates> PixelStreamingDelegates;
 	TMap<FString, IPixelStreaming2InputHandler::MessageHandlerFn> OriginalInputHandlers;
+	TMap<FString, TSet<uint8>> RemotePressedKeyCodesBySource;
 	FString AttachedStreamerId;
 	FDelegateHandle ClosedConnectionHandle;
 	FAkAudioDevice* WwiseDevice = nullptr;
@@ -102,5 +110,6 @@ private:
 	bool bLoggedWaitingForPixelStreaming = false;
 	bool bLoggedWaitingForStreamer = false;
 	bool bLoggedWaitingForInputHandler = false;
+	bool bRemoteAnyKeyPressed = false;
 	int32 LastCaptureRegistrationError = INDEX_NONE;
 };
