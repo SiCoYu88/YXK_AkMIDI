@@ -303,8 +303,10 @@ bool UAkMidiComponent::PostMidiEvent()
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
 	// 复用已保存的 PlayingID：首次为 AK_INVALID_PLAYING_ID（Wwise 创建新实例），
-	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例
-	AkPlayingID* ActiveID = ActivePlayingIDs.Find(AkAudioEvent);
+	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例。
+	// AkAudioEvent 为 TObjectPtr，统一 .Get() 取裸指针作为 map key，与 TWeakObjectPtr 的哈希/比较一致。
+	UAkAudioEvent* EventKey = AkAudioEvent.Get();
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(EventKey);
 	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
 
 	// 无活动实例时，若本批全是 Note-Off（不含任何 Note-On），说明目标实例并不存在：
@@ -323,14 +325,14 @@ bool UAkMidiComponent::PostMidiEvent()
 	if (PlayingID > 0)
 	{
 		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
-		ActivePlayingIDs.Add(AkAudioEvent, PlayingID);
+		ActivePlayingIDs.Add(EventKey, PlayingID);
 		PurgeStalePlayingIDs();
 		return true;
 	}
 	else
 	{
 		// Post 失败，清掉记录，下次重新创建实例
-		ActivePlayingIDs.Remove(AkAudioEvent);
+		ActivePlayingIDs.Remove(EventKey);
 		return false;
 	}
 }
@@ -402,8 +404,9 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
-	// 统一目标 Event：优先入参，空则回落组件自身 AkAudioEvent
-	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent;
+	// 统一目标 Event：优先入参，空则回落组件自身 AkAudioEvent。
+	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent.Get();
 	if (TargetEvent == nullptr)
 	{
 		Posts.Empty();
@@ -451,7 +454,8 @@ bool UAkMidiComponent::StopMidiEvent(UAkAudioEvent *AkEvent)
 {
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
-	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent;
+	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent.Get();
 	if (TargetEvent == nullptr)
 		return false;
 
