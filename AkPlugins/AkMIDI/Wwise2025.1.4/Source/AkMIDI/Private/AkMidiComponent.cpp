@@ -172,6 +172,22 @@ void UAkMidiComponent::BeginDestroy()
 		bInputCallbackRegistered = false;
 	}
 
+	// 停止仍在播放的 MIDI 实例（按记录的 PlayingID 精确停止），避免循环音色在组件销毁后残留。
+	// 引擎可能正在卸载：用 FAkAudioDevice::Get() 重新获取单例并判空，不用可能已失效的成员指针。
+	if (FAkAudioDevice* AudioDevice = FAkAudioDevice::Get())
+	{
+		const AkGameObjectID GameObjectID = GetAkGameObjectID();
+		for (auto& Pair : ActivePlayingIDs)
+		{
+			// key 可能因资产卸载而失效，Get() 返回 nullptr 时跳过，避免对悬空 Event 调用
+			if (UAkAudioEvent* Event = Pair.Key.Get())
+			{
+				AudioDevice->StopMidiEvent(Event, GameObjectID, Pair.Value);
+			}
+		}
+		ActivePlayingIDs.Empty();
+	}
+
 	Super::BeginDestroy();
 }
 
@@ -286,14 +302,37 @@ bool UAkMidiComponent::PostMidiEvent()
 	
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
-	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
+	// 复用已保存的 PlayingID：首次为 AK_INVALID_PLAYING_ID（Wwise 创建新实例），
+	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(AkAudioEvent);
+	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
+
+	// 无活动实例时，若本批全是 Note-Off（不含任何 Note-On），说明目标实例并不存在：
+	// 对不存在的实例发 Note-Off 无意义，若照常 Post 只会让 Wwise 新建一个孤儿实例。
+	// 因此直接丢弃本批，避免产生无法被 Note-Off 匹配到的残留播放实例。
+	if (TargetPlayingID == AK_INVALID_PLAYING_ID && !PostsContainNoteOn())
+	{
+		Posts.Empty();
+		return false;
+	}
+
+	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num(), TargetPlayingID);
 
 	Posts.Empty();
 
 	if (PlayingID > 0)
+	{
+		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
+		ActivePlayingIDs.Add(AkAudioEvent, PlayingID);
+		PurgeStalePlayingIDs();
 		return true;
+	}
 	else
+	{
+		// Post 失败，清掉记录，下次重新创建实例
+		ActivePlayingIDs.Remove(AkAudioEvent);
 		return false;
+	}
 }
 
 
@@ -362,40 +401,70 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 	}
 
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
-	AkPlayingID PlayingID = 0;
-	
-	if(AkEvent)
-		PlayingID = AkAudioDevice->PostMidiEvent(AkEvent, GameObjectID, Posts.GetData(), Posts.Num());
-	else
-		PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num());
+
+	// 统一目标 Event：优先入参，空则回落组件自身 AkAudioEvent
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent;
+	if (TargetEvent == nullptr)
+	{
+		Posts.Empty();
+		return false;
+	}
+
+	// 复用已保存的 PlayingID：首次为 AK_INVALID_PLAYING_ID（Wwise 创建新实例），
+	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(TargetEvent);
+	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
+
+	// 无活动实例时，若本批全是 Note-Off（不含任何 Note-On），说明目标实例并不存在：
+	// 对不存在的实例发 Note-Off 无意义，若照常 Post 只会让 Wwise 新建一个孤儿实例。
+	// 因此直接丢弃本批，避免产生无法被 Note-Off 匹配到的残留播放实例。
+	if (TargetPlayingID == AK_INVALID_PLAYING_ID && !PostsContainNoteOn())
+	{
+		Posts.Empty();
+		return false;
+	}
+
+	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(TargetEvent, GameObjectID, Posts.GetData(), Posts.Num(), TargetPlayingID);
 
 	for (auto& Post : Posts) 
 	{
 		UE_LOG(LogTemp,Verbose,TEXT("[MIDI] byType = %d, noteNum = %d"), Post.midiEvent.byType, Post.midiEvent.NoteOnOff.byNote);
 	}
 	Posts.Empty();
+
 	if (PlayingID > 0)
+	{
+		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
+		ActivePlayingIDs.Add(TargetEvent, PlayingID);
+		PurgeStalePlayingIDs();
 		return true;
+	}
 	else
+	{
+		// Post 失败，清掉记录，下次重新创建实例
+		ActivePlayingIDs.Remove(TargetEvent);
 		return false;
+	}
 }
 
 bool UAkMidiComponent::StopMidiEvent(UAkAudioEvent *AkEvent)
 {
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent;
+	if (TargetEvent == nullptr)
+		return false;
+
 	AKRESULT Res = AK_Fail;
 
-	if (AkEvent)
-	{
-		Res = AkAudioDevice->StopMidiEvent(AkEvent, GameObjectID);
+	// 用保存的 PlayingID 精确定位要停止的播放实例；无记录时退化为不传（停止该事件/对象的全部实例）
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(TargetEvent);
+	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
 
-	}
-	else
-	{
-		Res = AkAudioDevice->StopMidiEvent(AkAudioEvent, GameObjectID);
-	}
+	Res = AkAudioDevice->StopMidiEvent(TargetEvent, GameObjectID, TargetPlayingID);
 
+	// 无论停止结果如何都清空记录：实例已停止（或本就不存在），下一次播放应重新创建实例
+	ActivePlayingIDs.Remove(TargetEvent);
 
 	if (Res == AK_Success)
 		return true;
@@ -474,6 +543,31 @@ void UAkMidiComponent::MakePost(UAkMidiMessage *MIDINote)
 	Posts.Add(*Post);
 
 	return;
+}
+
+bool UAkMidiComponent::PostsContainNoteOn() const
+{
+	for (const AkMIDIPost& Post : Posts)
+	{
+		// 速度为 0 的 Note-On 按 MIDI 惯例等价于 Note-Off，不视为真正的起音
+		if (Post.midiEvent.byType == AK_MIDI_EVENT_TYPE_NOTE_ON && Post.midiEvent.NoteOnOff.byVelocity > 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UAkMidiComponent::PurgeStalePlayingIDs()
+{
+	// 移除 key 已失效（对应 Event 被 GC/卸载）的记录；此类记录的 PlayingID 已无意义。
+	for (auto It = ActivePlayingIDs.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
 }
 
 void UAkMidiComponent::GetMidiDevice(TArray<FMidiDevice>& InputDevices, TArray<FMidiDevice>& OutputDevices)
