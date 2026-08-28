@@ -4618,7 +4618,7 @@ AKRESULT FAkAudioDevice::RegisterPluginDLL(const FString& in_DllName, const FStr
 }
 
 #pragma region H3D
-AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts)
+AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts, AkPlayingID in_playingID)
 {
 	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
 	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
@@ -4630,10 +4630,10 @@ AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectI
 		return AK_InvalidParameter;
 	}
 
-	return SoundEngine->PostMIDIOnEvent(EventID, in_gameObjectID, in_pPosts, in_uNumPosts);
+	return SoundEngine->PostMIDIOnEvent(EventID, in_gameObjectID, in_pPosts, in_uNumPosts, false, 0, NULL, NULL, in_playingID);
 }
 
-AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID)
+AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkPlayingID in_playingID)
 {
 	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::StopMidiEvent"));
 	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
@@ -4645,7 +4645,7 @@ AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID i
 		return AK_InvalidParameter;
 	}
 
-	return SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID);
+	return SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID, in_playingID);
 }
 #pragma endregion
 // end
