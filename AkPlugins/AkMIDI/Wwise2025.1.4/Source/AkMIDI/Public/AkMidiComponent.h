@@ -123,8 +123,6 @@ private:
 
 	TQueue<FRawMidiPacket, EQueueMode::Mpsc> IncomingMidiQueue;
 
-	friend class MakePostsAsync;
-
 
 
 private:
@@ -143,24 +141,6 @@ private:
 
 
 
-class MakePostsAsync : public FNonAbandonableTask
-{
-public:
-	friend class FAutoDeleteAsyncTask<MakePostsAsync>;
-
-	MakePostsAsync(UAkMidiComponent* MidiComponent, UAkMidiMessage* AkMessage, std::vector<unsigned char> Message, double DeltaTime) : MidiComponent(MidiComponent),AkMessage(AkMessage), RawMessage(Message), DeltaTime(DeltaTime){}
-
-protected:
-	UAkMidiComponent* MidiComponent;
-	UAkMidiMessage* AkMessage;
-	std::vector<unsigned char> RawMessage;
-	double DeltaTime;
-
-	void DoWork();
-
-	FORCEINLINE TStatId GetStatId() const
-	{
-		RETURN_QUICK_DECLARE_CYCLE_STAT(MakePostsAsync, STATGROUP_ThreadPoolAsyncTasks);
-	}
-};
+// 已移除：MakePostsAsync 为遗留死代码，其 DoWork 与 HandleRtMidiCallback 完全重复且从未被使用，
+// 且会在工作线程中直接操作 UObject / 广播动态委托，存在线程安全隐患。
 #pragma endregion
