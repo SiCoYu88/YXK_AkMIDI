@@ -107,6 +107,19 @@ private:
 	
 	TArray<AkMIDIPost> Posts;
 
+	// 活动 MIDI 播放实例 ID（按 Event 记录；Game Object 即本组件自身，无需额外维度）。
+	// 规则（参考 Doc/Wwise_MIDI_Event循环播放与NoteOff排查说明.md 第 5.3 节）：
+	//   1. 首次 Post 传 AK_INVALID_PLAYING_ID 让 Wwise 创建播放实例；
+	//   2. 保存返回值；
+	//   3. 后续批次（含 Note-Off）一律复用保存的 PlayingID，保证路由到同一实例；
+	//   4. StopMidiEvent 时用该 PlayingID 精确停止，随后清空，下次播放重新创建实例。
+	// 所有读写均发生在游戏线程（Post/Stop/BeginDestroy），与 StateCS 保护的音频线程读不冲突。
+	//
+	// key 使用 TWeakObjectPtr 而非裸指针：Event 资产被卸载/替换（如 UGC 切换音频工程）时，
+	// 弱引用会自动失效（IsValid()==false），避免命中悬空 key 而把消息路由到错误实例。
+	// 弱引用不保活对象，无需 UPROPERTY 追踪引用。
+	TMap<TWeakObjectPtr<UAkAudioEvent>, AkPlayingID> ActivePlayingIDs;
+
 	TArray<AkMIDIPost*> PostPool;
 
 	UAkMidiDevice *MidiDevice;
@@ -140,6 +153,13 @@ private:
 
 private:
 	virtual void MakePost(UAkMidiMessage *MIDINote);
+
+	// 判断当前待提交的 Posts 中是否至少包含一个 Note-On（速度可为 0 的 Note-On 视作 Note-Off，
+	// 语义上等价于停止，不计入）。用于在无活动实例时拦截"纯 Note-Off 批次"，避免新建孤儿实例。
+	bool PostsContainNoteOn() const;
+
+	// 清理 ActivePlayingIDs 中因 Event 资产被 GC/卸载而失效的弱引用 key，防止 map 缓慢膨胀。
+	void PurgeStalePlayingIDs();
 
 	void HandleWwiseCallback(AkAudioSettings* in_AudioSettings);
 
