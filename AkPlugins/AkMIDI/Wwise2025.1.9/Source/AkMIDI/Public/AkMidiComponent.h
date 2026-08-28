@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
+#include "UObject/ObjectKey.h"
 #include "AkMidiMessage.h"
 #include "AkComponent.h"
 #include "AkMidiDevice.h"
@@ -107,7 +108,7 @@ private:
 	
 	TArray<AkMIDIPost> Posts;
 
-	// 活动 MIDI 播放实例 ID（按 Event 记录；Game Object 即本组件自身，无需额外维度）。
+	// 活动 MIDI 播放实例记录（按 Event 记录；Game Object 即本组件自身，无需额外维度）。
 	// 规则（参考 Doc/Wwise_MIDI_Event循环播放与NoteOff排查说明.md 第 5.3 节）：
 	//   1. 首次 Post 传 AK_INVALID_PLAYING_ID 让 Wwise 创建播放实例；
 	//   2. 保存返回值；
@@ -115,10 +116,11 @@ private:
 	//   4. StopMidiEvent 时用该 PlayingID 精确停止，随后清空，下次播放重新创建实例。
 	// 所有读写均发生在游戏线程（Post/Stop/BeginDestroy），与 StateCS 保护的音频线程读不冲突。
 	//
-	// key 使用 TWeakObjectPtr 而非裸指针：Event 资产被卸载/替换（如 UGC 切换音频工程）时，
-	// 弱引用会自动失效（IsValid()==false），避免命中悬空 key 而把消息路由到错误实例。
-	// 弱引用不保活对象，无需 UPROPERTY 追踪引用。
-	TMap<TWeakObjectPtr<UAkAudioEvent>, AkPlayingID> ActivePlayingIDs;
+	// key 使用 TObjectKey（记录 object index + serial number）而非裸指针：Event 资产被卸载/替换
+	// （如 UGC 切换音频工程）后，即便新对象复用了同一内存地址，serial number 不同也不会误命中，
+	// 从而杜绝把消息路由到错误实例。TObjectKey 不参与 GC、不保活对象，且可用 ResolveObjectPtr()
+	// 安全取回仍存活的 Event 指针（对象已销毁时返回 nullptr），供 BeginDestroy 精确停止实例。
+	TMap<TObjectKey<UAkAudioEvent>, AkPlayingID> ActivePlayingIDs;
 
 	TArray<AkMIDIPost*> PostPool;
 
