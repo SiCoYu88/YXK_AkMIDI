@@ -1284,20 +1284,26 @@ public:
 #pragma region H3D
 	/**
 	 * Posts MIDI messages on a Wwise event for the specified game object.
+	 * @param in_playingID 目标播放实例 ID。首次调用传 AK_INVALID_PLAYING_ID（Wwise 创建新实例并返回其 ID），
+	 *                     后续批次（含 Note-Off）应传入之前保存的返回值，确保 Note-On/Note-Off 路由到同一实例。
 	 */
 	AkPlayingID PostMidiEvent(
 		UAkAudioEvent* in_Event,
 		AkGameObjectID in_gameObjectID,
 		AkMIDIPost* in_pPosts,
-		AkUInt16 in_uNumPosts
+		AkUInt16 in_uNumPosts,
+		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID
 		);
 
 	/**
 	 * Stops MIDI playback on a Wwise event for the specified game object.
+	 * @param in_playingID 目标播放实例 ID。传入保存的 PlayingID 可精确停止指定实例；
+	 *                     传 AK_INVALID_PLAYING_ID 则停止该事件/对象上的全部 MIDI 实例。
 	 */
 	AKRESULT StopMidiEvent(
 		UAkAudioEvent* in_Event,
-		AkGameObjectID in_gameObjectID
+		AkGameObjectID in_gameObjectID,
+		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID
 		);
 #pragma endregion
 
