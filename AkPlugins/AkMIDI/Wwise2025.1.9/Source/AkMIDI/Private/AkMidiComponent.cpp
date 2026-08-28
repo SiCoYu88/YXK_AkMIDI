@@ -6,13 +6,15 @@
 
 void MyCallback(double DeltaTime, std::vector<unsigned char> *Message, void *UserData)
 {
-	UAkMidiComponent* MidiComponent = (UAkMidiComponent*)UserData;
+	UAkMidiComponent* MidiComponent = static_cast<UAkMidiComponent*>(UserData);
 
-	if (!MidiComponent || MidiComponent->GetIsInputFromUnreal())
+	// 回调运行在 RtMidi 线程：仅做入队，不读取/修改任何 UObject 状态，
+	// 状态过滤（GetIsInputFromUnreal 等）统一放到游戏线程的 ProcessIncomingMidiQueue 中处理。
+	if (!MidiComponent || Message == nullptr || Message->empty())
 		return;
 
 	FRawMidiPacket Packet;
-	Packet.Data.SetNumUninitialized(Message->size());
+	Packet.Data.SetNumUninitialized((int32)Message->size());
 	FMemory::Memcpy(Packet.Data.GetData(), Message->data(), Message->size());
 	Packet.DeltaTime = DeltaTime;
 	MidiComponent->IncomingMidiQueue.Enqueue(MoveTemp(Packet));
@@ -20,7 +22,7 @@ void MyCallback(double DeltaTime, std::vector<unsigned char> *Message, void *Use
 
 void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiComponent, std::vector<unsigned char> RawMessage, double DeltaTime)
 {
-	if (!AkMessage)
+	if (!AkMessage || !MidiComponent)
 		return;
 
 	//External Midi Message Send To Wwise
@@ -35,15 +37,23 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 
 			if (Type >= 0x8 && Type <= 0xE)
 			{
-				AkMessage->NoteType = (EAkMessageType)(Type & 0x0F);
-				AkMessage->Channel = ChannelOrSubType;
-				AkMessage->Data01 = RawMessage.at(i++) & 0xFF;
-
-				if (Type != 0xC && Type != 0xD)
+				const bool bHasData02 = (Type != 0xC && Type != 0xD);
+				const size_t RequiredBytes = bHasData02 ? 2 : 1;
+				// i 已指向数据字节，校验剩余长度是否足够，避免越界读取
+				if (i + RequiredBytes > nBytes)
 				{
-					AkMessage->Data02 = RawMessage.at(i++) & 0xFF;
+					UE_LOG(LogTemp, Warning, TEXT("[MIDI] Truncated message, expected %llu data byte(s)"), (uint64)RequiredBytes);
+					break;
 				}
 
+				AkMessage->NoteType = (EAkMessageType)(Type & 0x0F);
+				AkMessage->Channel = ChannelOrSubType;
+				AkMessage->Data01 = RawMessage[i++] & 0xFF;
+
+				if (bHasData02)
+				{
+					AkMessage->Data02 = RawMessage[i++] & 0xFF;
+				}
 			}
 			//Wwise Not Support SysEx & Midi Clock Event Now
 			/*else if (Type == 0xF)
@@ -61,15 +71,17 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 					continue;
 				}
 			}*/
+			else
+			{
+				// 未识别的状态字节（如 0xF SysEx/Clock），跳出避免死循环
+				break;
+			}
 		}
 	}
 	//External Midi Message Send To Other Midi Receiver
 	else if (!MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
-		if (MidiComponent)
-		{
-			MidiComponent->SendRawMidiMessage(RawMessage);
-		}
+		MidiComponent->SendRawMidiMessage(RawMessage);
 	}
 
 
@@ -236,14 +248,18 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 
 			uint8 Status = ((uint8)MidiMessage->NoteType << 4) | MidiMessage->Channel;
 			uint8 RawMessage[3] = { Status,(uint8)MidiMessage->Data01, (uint8)MidiMessage->Data02 };
-			
-			if (MidiMessage->NoteType != EAkMessageType::AMT_Program_Change && MidiMessage->NoteType != EAkMessageType::AMT_Channel_AfterTouch)
+
+			RtMidiOut* MidiOut = MidiDevice ? MidiDevice->GetRtMidiOut() : nullptr;
+			if (MidiOut)
 			{
-				MidiDevice->GetRtMidiOut()->sendMessage(&RawMessage[0], 3);
-			}
-			else
-			{
-				MidiDevice->GetRtMidiOut()->sendMessage(&RawMessage[0], 2);
+				if (MidiMessage->NoteType != EAkMessageType::AMT_Program_Change && MidiMessage->NoteType != EAkMessageType::AMT_Channel_AfterTouch)
+				{
+					MidiOut->sendMessage(&RawMessage[0], 3);
+				}
+				else
+				{
+					MidiOut->sendMessage(&RawMessage[0], 2);
+				}
 			}
 
 			MidiMessage->RecoverMidiMessage();
@@ -309,9 +325,11 @@ void UAkMidiComponent::MakePost(UAkMidiMessage *MIDINote)
 	if (MIDINote == nullptr)
 		return;
 
-	if (PostPoolCount >= PostsPoolMax - 2)
-		PostPoolCount = 0;
-	
+	// 用取模保证索引恒在 [0, PostPool.Num()) 范围内，避免 uint8 溢出与不必要的容量浪费
+	if (PostPool.Num() == 0)
+		return;
+	PostPoolCount = PostPoolCount % PostPool.Num();
+
 	AkMIDIPost *Post = PostPool[PostPoolCount++];
 
 	Post->midiEvent.byChan = MIDINote->Channel;
@@ -462,10 +480,14 @@ void UAkMidiComponent::CloseMidiDevice(EIOType ClosePort)
 
 void UAkMidiComponent::SendRawMidiMessage(std::vector<unsigned char>& RawMessage)
 {
-	if (!MidiDevice)
+	if (!MidiDevice || RawMessage.empty())
 		return;
 
-	MidiDevice->GetRtMidiOut()->sendMessage(RawMessage.data(), RawMessage.size());
+	RtMidiOut* MidiOut = MidiDevice->GetRtMidiOut();
+	if (!MidiOut)
+		return;
+
+	MidiOut->sendMessage(RawMessage.data(), RawMessage.size());
 
 	return;
 }
@@ -477,86 +499,21 @@ void UAkMidiComponent::ProcessIncomingMidiQueue()
 	FRawMidiPacket Packet;
 	while (IncomingMidiQueue.Dequeue(Packet))
 	{
+		// 状态过滤统一在游戏线程处理（原先位于 RtMidi 回调线程的 MyCallback 中）
+		if (GetIsInputFromUnreal())
+			continue;
+
 		std::vector<unsigned char> RawMessage(Packet.Data.GetData(), Packet.Data.GetData() + Packet.Data.Num());
-		if (MessagePoolCount >= MessagePoolMax - 2)
-			MessagePoolCount = 0;
+		if (MessagePool.Num() == 0)
+			continue;
+		MessagePoolCount = MessagePoolCount % MessagePool.Num();
 		UAkMidiMessage* AkMessage = MessagePool[MessagePoolCount++];
 		HandleRtMidiCallback(AkMessage, this, RawMessage, Packet.DeltaTime);
 	}
 }
 
-void MakePostsAsync::DoWork()
-{
-	if (!AkMessage)
-		return;
-
-	//External Midi Message Send To Wwise
-	if (MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
-	{
-		size_t nBytes = RawMessage.size();
-		for (size_t i = 0; i < nBytes;)
-		{
-			uint8 ID = RawMessage.at(i++);
-			uint8 Type = ID >> 4;
-			uint8 ChannelOrSubType = ID & 0x0F;
-
-			if (Type >= 0x8 && Type <= 0xE)
-			{
-				AkMessage->NoteType = (EAkMessageType)(Type & 0x0F);
-				AkMessage->Channel = ChannelOrSubType;
-				AkMessage->Data01 = RawMessage.at(i++) & 0xFF;
-				
-				if (Type != 0xC && Type != 0xD)
-				{
-					AkMessage->Data02 = RawMessage.at(i++) & 0xFF;
-				}
-
-			}
-			//Wwise Not Support SysEx & Midi Clock Event Now
-			/*else if (Type == 0xF)
-			{
-				//SysEx Message Start
-				if (ChannelOrSubType == 0)
-				{
-					MidiComponent->StartSysEx();
-					continue;
-				}
-				//SysEx Message End
-				else if (ChannelOrSubType == 7)
-				{
-					MidiComponent->StopSysEx();
-					continue;
-				}
-			}*/
-		}	
-	}
-	//External Midi Message Send To Other Midi Receiver
-	else if(!MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
-	{
-		if (MidiComponent)
-		{
-			MidiComponent->SendRawMidiMessage(RawMessage);
-		}
-	}
-
-	
-	if (MidiComponent->bMidiFxOnOff)
-	{
-		MidiComponent->InsertMidiFx(AkMessage);
-	}
-
-	MidiComponent->MakePost(AkMessage);
-
-	
-
-	if (MidiComponent->OnMessageReceived.IsBound())
-	{
-		MidiComponent->OnMessageReceived.Broadcast(AkMessage, DeltaTime);
-
-	}
-
-	return;
-}
+// 已移除：MakePostsAsync::DoWork 与 HandleRtMidiCallback 逻辑完全重复，且从未被实例化调用。
+// 该类会在工作线程中直接操作 UObject / 广播动态委托，存在线程安全隐患。
 
 
 
