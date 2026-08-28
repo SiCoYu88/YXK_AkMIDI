@@ -9,7 +9,7 @@
 #include "AkComponent.h"
 #include "AkMidiDevice.h"
 #include "AkAudioDevice.h"
-#include "Async/AsyncWork.h"
+#include "HAL/ThreadSafeBool.h"
 
 #include <vector>
 #include "Containers/Queue.h"
@@ -92,13 +92,17 @@ public:
 
 	//----------------------------------------------------
 	virtual bool PostMidiEvent();
-	bool GetIsOutputToWwise() const { return OutputTarget == EMidiOutputTarget::Wwise; }
-	bool GetIsInputFromUnreal() const { return InputSource == EMidiInputSource::Unreal; }
+	bool GetIsOutputToWwise() const;
+	bool GetIsInputFromUnreal() const;
 	virtual void OnRegister() override;
+	virtual void BeginDestroy() override;
+	virtual void TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 
 
 private:
+	// 环形复用池：OnMessageReceived 广播出去的 UAkMidiMessage* 会在后续消息到来时被覆盖。
+	// 蓝图侧应在回调内同步读取所需数据，切勿异步/延迟持有该指针，否则会读到脏数据。
 	TArray<UAkMidiMessage*> MessagePool;
 	
 	TArray<AkMIDIPost> Posts;
@@ -114,6 +118,9 @@ private:
 	EMidiInputSource InputSource = EMidiInputSource::Unreal;
 	bool bMidiFxOnOff = false;
 
+	// 保护 InputSource / OutputTarget / bMidiFxOnOff 的跨线程读写（游戏线程写，音频线程读）
+	mutable FCriticalSection StateCS;
+
 	FMidiDevice DefaultInputDevice{TEXT("Unreal"), 127 };
 	FMidiDevice DefaultOutputDevice{TEXT("Wwise"), 127 };
 
@@ -122,6 +129,12 @@ private:
 	uint8 PostPoolCount = 0;
 
 	TQueue<FRawMidiPacket, EQueueMode::Mpsc> IncomingMidiQueue;
+
+	// 音频渲染线程仅置位；真正的消费（广播/蓝图/RtMidi 发送）放在游戏线程 TickComponent 中执行
+	FThreadSafeBool bHasPendingMidi = false;
+
+	// 标记 RtMidi 输入回调是否已注册，析构时据此决定是否需要 cancelCallback
+	bool bInputCallbackRegistered = false;
 
 
 

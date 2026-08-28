@@ -29,9 +29,27 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 	if (MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
 	{
 		size_t nBytes = RawMessage.size();
+		uint8 RunningStatus = 0; // 记录上一个通道语音状态字节，用于支持 MIDI running status
 		for (size_t i = 0; i < nBytes;)
 		{
-			uint8 ID = RawMessage.at(i++);
+			uint8 ID = RawMessage[i];
+
+			if (ID >= 0x80)
+			{
+				// 是状态字节，正常消费并更新 running status
+				++i;
+			}
+			else
+			{
+				// 是数据字节打头：MIDI running status，复用上一个状态字节，i 不前进
+				if (RunningStatus == 0)
+				{
+					// 无可复用的状态字节，无法解析，跳出避免死循环
+					break;
+				}
+				ID = RunningStatus;
+			}
+
 			uint8 Type = ID >> 4;
 			uint8 ChannelOrSubType = ID & 0x0F;
 
@@ -45,6 +63,8 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 					UE_LOG(LogTemp, Warning, TEXT("[MIDI] Truncated message, expected %llu data byte(s)"), (uint64)RequiredBytes);
 					break;
 				}
+
+				RunningStatus = ID; // 通道语音消息可作为后续 running status
 
 				AkMessage->NoteType = (EAkMessageType)(Type & 0x0F);
 				AkMessage->Channel = ChannelOrSubType;
@@ -73,7 +93,8 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 			}*/
 			else
 			{
-				// 未识别的状态字节（如 0xF SysEx/Clock），跳出避免死循环
+				// System 消息（0xF）等会清除 running status；未支持的类型直接跳出避免死循环
+				RunningStatus = 0;
 				break;
 			}
 		}
@@ -96,7 +117,7 @@ void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiCompo
 
 	if (MidiComponent->OnMessageReceived.IsBound())
 	{
-		MidiComponent->OnMessageReceived.Broadcast(AkMessage, 0);
+		MidiComponent->OnMessageReceived.Broadcast(AkMessage, (float)DeltaTime);
 
 	}
 
@@ -112,33 +133,80 @@ void UAkMidiComponent::OnRegister()
 		AkAudioDevice = FAkAudioDevice::Get();
 
 	Super::OnRegister();
-	
-	AkAudioDevice->RegisterComponent(this);
+
+	if (AkAudioDevice)
+		AkAudioDevice->RegisterComponent(this);
 
 	return;
+}
+
+void UAkMidiComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// 在游戏线程消费外部 MIDI 数据：解析、填充 Posts、广播蓝图委托、RtMidi 发送。
+	// 只有当音频线程置位后才处理，避免每帧空转。
+	if (bHasPendingMidi)
+	{
+		bHasPendingMidi = false;
+
+		ProcessIncomingMidiQueue();
+
+		// 将已准备好的 Posts 提交给 Wwise（PostMidiEvent 为线程安全的入队 API，可在游戏线程调用）
+		if (GetIsOutputToWwise())
+		{
+			PostMidiEvent();
+		}
+	}
+}
+
+void UAkMidiComponent::BeginDestroy()
+{
+	// 在对象进入销毁流程时，尽早取消 RtMidi 回调，杜绝回调线程访问已失效对象
+	if (MidiDevice && bInputCallbackRegistered)
+	{
+		if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+		{
+			MidiIn->cancelCallback();
+		}
+		bInputCallbackRegistered = false;
+	}
+
+	Super::BeginDestroy();
+}
+
+bool UAkMidiComponent::GetIsOutputToWwise() const
+{
+	FScopeLock Lock(&StateCS);
+	return OutputTarget == EMidiOutputTarget::Wwise;
+}
+
+bool UAkMidiComponent::GetIsInputFromUnreal() const
+{
+	FScopeLock Lock(&StateCS);
+	return InputSource == EMidiInputSource::Unreal;
 }
 
 
 
 void UAkMidiComponent::HandleWwiseCallback(AkAudioSettings* in_AudioSettings)
 {
-	if (!GetIsOutputToWwise())
-		return;
-
-	if (AudioSettings == nullptr)
-		AudioSettings = in_AudioSettings;
-
-	ProcessIncomingMidiQueue();
-	PostMidiEvent();
-
-	//UE_LOG(LogTemp, Warning, TEXT("HandleWwiseCallback"));
-
+	// 该回调运行在 Wwise 音频渲染线程：不得在此操作 UObject / 广播蓝图委托 / 调用 RtMidi。
+	// 这里仅置位标记，真正的消费在游戏线程 TickComponent 中进行。
+	// 注意：in_AudioSettings 指向音频线程栈上的临时对象，跨线程保存其裸指针会悬空，故不缓存。
+	(void)in_AudioSettings;
+	bHasPendingMidi = true;
 }
 
 
 UAkMidiComponent::UAkMidiComponent(const class FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer),
 OutputTarget(EMidiOutputTarget::Wwise), InputSource(EMidiInputSource::Unreal), bMidiFxOnOff(false), MessagePoolCount(0), PostPoolCount(0)
 {
+	// 启用 Tick：外部 MIDI 数据的消费（广播/蓝图/RtMidi 发送）统一放到游戏线程执行，
+	// 避免在 Wwise 音频渲染线程上操作 UObject 与蓝图委托。
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = true;
+
 	MidiDevice = NewObject<UAkMidiDevice>();
 	MidiDevice->AddToRoot();
 
@@ -157,6 +225,19 @@ OutputTarget(EMidiOutputTarget::Wwise), InputSource(EMidiInputSource::Unreal), b
 
 UAkMidiComponent::~UAkMidiComponent()
 {
+	// 先取消 RtMidi 输入回调并关闭端口，确保回调线程不再触碰本对象（避免 use-after-free）
+	if (MidiDevice)
+	{
+		if (bInputCallbackRegistered)
+		{
+			if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+			{
+				MidiIn->cancelCallback();
+			}
+			bInputCallbackRegistered = false;
+		}
+	}
+
 	CloseMidiDevice(EIOType::IO_Both);
 
 	for (auto Message : MessagePool)
@@ -166,10 +247,19 @@ UAkMidiComponent::~UAkMidiComponent()
 		if (!Message->IsValidLowLevel())
 			continue;
 
+		// 移除 root 引用后再销毁，避免 GC 泄漏
+		Message->RemoveFromRoot();
 		Message->ConditionalBeginDestroy();
-		Message = nullptr;
 	}
 	MessagePool.Empty();
+
+	// 释放 MidiDevice（其析构会 delete 内部 RtMidiIn/RtMidiOut）
+	if (MidiDevice && MidiDevice->IsValidLowLevel())
+	{
+		MidiDevice->RemoveFromRoot();
+		MidiDevice->ConditionalBeginDestroy();
+	}
+	MidiDevice = nullptr;
 
 	for (auto Post : PostPool)
 	{
@@ -188,7 +278,11 @@ UAkMidiComponent::~UAkMidiComponent()
 bool UAkMidiComponent::PostMidiEvent()
 {
 	if (AkAudioEvent == nullptr || Posts.Num() <= 0)
+	{
+		// 事件为空或无待提交数据时，同样清空 Posts，避免其无上限累积
+		Posts.Empty();
 		return false;
+	}
 	
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
@@ -277,7 +371,7 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 
 	for (auto& Post : Posts) 
 	{
-		UE_LOG(LogTemp,Log,TEXT("[MIDI] byType = %d, noteNum = %d"), Post.midiEvent.byType, Post.midiEvent.NoteOnOff.byNote);
+		UE_LOG(LogTemp,Verbose,TEXT("[MIDI] byType = %d, noteNum = %d"), Post.midiEvent.byType, Post.midiEvent.NoteOnOff.byNote);
 	}
 	Posts.Empty();
 	if (PlayingID > 0)
@@ -316,6 +410,7 @@ UAkMidiMessage* UAkMidiComponent::InsertMidiFx_Implementation(UAkMidiMessage* Mi
 
 void UAkMidiComponent::MidiFxBypass(bool bIsMidiFxBypass)
 {
+	FScopeLock Lock(&StateCS);
 	bMidiFxOnOff = !bIsMidiFxBypass;
 }
 
@@ -396,7 +491,11 @@ void UAkMidiComponent::GetMidiDevice(TArray<FMidiDevice>& InputDevices, TArray<F
 
 	MidiDevice->GetMidiDevice(InputDevices, OutputDevices);
 
-	MidiDevice->GetRtMidiIn()->setCallback(MyCallback, this);
+	if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+	{
+		MidiIn->setCallback(MyCallback, this);
+		bInputCallbackRegistered = true;
+	}
 
 
 	return;
@@ -409,11 +508,15 @@ void UAkMidiComponent::OpenMidiInputDevice(uint8 InputPort)
 	
 	if (InputPort == 127)
 	{
+		FScopeLock Lock(&StateCS);
 		InputSource = EMidiInputSource::Unreal;
 	}
 	else
 	{
-		InputSource = EMidiInputSource::ExternalDevice;
+		{
+			FScopeLock Lock(&StateCS);
+			InputSource = EMidiInputSource::ExternalDevice;
+		}
 		MidiDevice->OpenInput(InputPort);
 
 	}
@@ -428,11 +531,15 @@ void UAkMidiComponent::OpenMidiOutputDevice(uint8 OutputPort)
 
 	if (OutputPort == 127)
 	{
+		FScopeLock Lock(&StateCS);
 		OutputTarget = EMidiOutputTarget::Wwise;
 	}
 	else
 	{
-		OutputTarget = EMidiOutputTarget::ExternalDevice;
+		{
+			FScopeLock Lock(&StateCS);
+			OutputTarget = EMidiOutputTarget::ExternalDevice;
+		}
 		MidiDevice->OpenOutput(OutputPort);
 	}
 
@@ -444,33 +551,45 @@ void UAkMidiComponent::CloseMidiDevice(EIOType ClosePort)
 	if (!MidiDevice)
 		return;
 
+	// 先在锁内读取快照，再在锁外执行设备 IO，最后在锁内写回状态，避免长时间持锁
+	EMidiInputSource InputSnapshot;
+	EMidiOutputTarget OutputSnapshot;
+	{
+		FScopeLock Lock(&StateCS);
+		InputSnapshot = InputSource;
+		OutputSnapshot = OutputTarget;
+	}
+
 	if (ClosePort == EIOType::IO_Both)
 	{
-		if (InputSource == EMidiInputSource::ExternalDevice)
+		if (InputSnapshot == EMidiInputSource::ExternalDevice)
 		{
 			MidiDevice->CloseInput();
 		}
-		if (OutputTarget == EMidiOutputTarget::ExternalDevice)
+		if (OutputSnapshot == EMidiOutputTarget::ExternalDevice)
 		{
 			MidiDevice->CloseOutput();
 		}
+		FScopeLock Lock(&StateCS);
 		InputSource = EMidiInputSource::None;
 		OutputTarget = EMidiOutputTarget::None;
 	}
 	else if (ClosePort == EIOType::IO_Input)
 	{
-		if (InputSource == EMidiInputSource::ExternalDevice)
+		if (InputSnapshot == EMidiInputSource::ExternalDevice)
 		{
 			MidiDevice->CloseInput();
 		}
+		FScopeLock Lock(&StateCS);
 		InputSource = EMidiInputSource::None;
 	}
 	else if (ClosePort == EIOType::IO_Output)
 	{
-		if (OutputTarget == EMidiOutputTarget::ExternalDevice)
+		if (OutputSnapshot == EMidiOutputTarget::ExternalDevice)
 		{
 			MidiDevice->CloseOutput();
 		}
+		FScopeLock Lock(&StateCS);
 		OutputTarget = EMidiOutputTarget::None;
 	}
 
