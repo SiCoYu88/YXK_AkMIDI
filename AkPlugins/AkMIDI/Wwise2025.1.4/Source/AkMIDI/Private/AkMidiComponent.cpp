@@ -2,6 +2,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "AkMidiComponent.h"
+#include "AkAudioEvent.h"
 #include "Engine.h"
 
 void MyCallback(double DeltaTime, std::vector<unsigned char> *Message, void *UserData)
@@ -179,8 +180,8 @@ void UAkMidiComponent::BeginDestroy()
 		const AkGameObjectID GameObjectID = GetAkGameObjectID();
 		for (auto& Pair : ActivePlayingIDs)
 		{
-			// key 可能因资产卸载而失效，Get() 返回 nullptr 时跳过，避免对悬空 Event 调用
-			if (UAkAudioEvent* Event = Pair.Key.Get())
+			// Event 可能因资产卸载而失效，ResolveObjectPtr() 返回 nullptr 时跳过，避免对悬空 Event 调用
+			if (UAkAudioEvent* Event = Pair.Key.ResolveObjectPtr())
 			{
 				AudioDevice->StopMidiEvent(Event, GameObjectID, Pair.Value);
 			}
@@ -304,8 +305,7 @@ bool UAkMidiComponent::PostMidiEvent()
 
 	// 复用已保存的 PlayingID：首次为 AK_INVALID_PLAYING_ID（Wwise 创建新实例），
 	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例。
-	// AkAudioEvent 为 TObjectPtr，统一 .Get() 取裸指针作为 map key，与 TWeakObjectPtr 的哈希/比较一致。
-	UAkAudioEvent* EventKey = AkAudioEvent.Get();
+	const TObjectKey<UAkAudioEvent> EventKey(AkAudioEvent.Get());
 	AkPlayingID* ActiveID = ActivePlayingIDs.Find(EventKey);
 	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
 
@@ -415,7 +415,8 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 
 	// 复用已保存的 PlayingID：首次为 AK_INVALID_PLAYING_ID（Wwise 创建新实例），
 	// 之后传入上次返回的 PlayingID，保证 Note-On/Note-Off 路由到同一播放实例
-	AkPlayingID* ActiveID = ActivePlayingIDs.Find(TargetEvent);
+	const TObjectKey<UAkAudioEvent> EventKey(TargetEvent);
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(EventKey);
 	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
 
 	// 无活动实例时，若本批全是 Note-Off（不含任何 Note-On），说明目标实例并不存在：
@@ -438,14 +439,14 @@ bool UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAk
 	if (PlayingID > 0)
 	{
 		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
-		ActivePlayingIDs.Add(TargetEvent, PlayingID);
+		ActivePlayingIDs.Add(EventKey, PlayingID);
 		PurgeStalePlayingIDs();
 		return true;
 	}
 	else
 	{
 		// Post 失败，清掉记录，下次重新创建实例
-		ActivePlayingIDs.Remove(TargetEvent);
+		ActivePlayingIDs.Remove(EventKey);
 		return false;
 	}
 }
@@ -462,13 +463,14 @@ bool UAkMidiComponent::StopMidiEvent(UAkAudioEvent *AkEvent)
 	AKRESULT Res = AK_Fail;
 
 	// 用保存的 PlayingID 精确定位要停止的播放实例；无记录时退化为不传（停止该事件/对象的全部实例）
-	AkPlayingID* ActiveID = ActivePlayingIDs.Find(TargetEvent);
+	const TObjectKey<UAkAudioEvent> EventKey(TargetEvent);
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(EventKey);
 	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
 
 	Res = AkAudioDevice->StopMidiEvent(TargetEvent, GameObjectID, TargetPlayingID);
 
 	// 无论停止结果如何都清空记录：实例已停止（或本就不存在），下一次播放应重新创建实例
-	ActivePlayingIDs.Remove(TargetEvent);
+	ActivePlayingIDs.Remove(EventKey);
 
 	if (Res == AK_Success)
 		return true;
@@ -564,10 +566,10 @@ bool UAkMidiComponent::PostsContainNoteOn() const
 
 void UAkMidiComponent::PurgeStalePlayingIDs()
 {
-	// 移除 key 已失效（对应 Event 被 GC/卸载）的记录；此类记录的 PlayingID 已无意义。
+	// 移除 Event 已失效（被 GC/卸载）的记录；此类记录的 PlayingID 已无意义。
 	for (auto It = ActivePlayingIDs.CreateIterator(); It; ++It)
 	{
-		if (!It.Key().IsValid())
+		if (It.Key().ResolveObjectPtr() == nullptr)
 		{
 			It.RemoveCurrent();
 		}
