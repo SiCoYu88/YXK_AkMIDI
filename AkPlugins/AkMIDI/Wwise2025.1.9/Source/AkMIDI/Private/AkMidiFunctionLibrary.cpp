@@ -23,13 +23,13 @@ UAkMidiMessage* UAkMidiFunctionLibrary::CreateAkMidiMessage(
 	return MidiMessage;
 }
 
-bool UAkMidiFunctionLibrary::PostMidiEvent(
+int32 UAkMidiFunctionLibrary::PostMidiEvent(
 	UAkMidiComponent* MidiComponent,
 	TArray<UAkMidiMessage*> AkMidiMessages,
 	UAkAudioEvent *AkEvent)
 {
 	if (MidiComponent == nullptr || AkMidiMessages.Num() <= 0)
-		return false;
+		return AK_INVALID_PLAYING_ID;
 
 	return MidiComponent->PostMidiEvent(AkMidiMessages, AkEvent);
 }
