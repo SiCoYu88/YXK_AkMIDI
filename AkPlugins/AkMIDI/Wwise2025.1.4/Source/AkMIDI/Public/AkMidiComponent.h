@@ -74,7 +74,7 @@ public:
 	void CloseMidiDevice(EIOType ClosePort);
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
-	bool PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent = nullptr);
+	int32 PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent = nullptr);
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
 	bool StopMidiEvent(UAkAudioEvent *AkEvent = nullptr);
@@ -159,6 +159,12 @@ private:
 	// 判断当前待提交的 Posts 中是否至少包含一个 Note-On（速度可为 0 的 Note-On 视作 Note-Off，
 	// 语义上等价于停止，不计入）。用于在无活动实例时拦截"纯 Note-Off 批次"，避免新建孤儿实例。
 	bool PostsContainNoteOn() const;
+
+	// 解析出本次 Post 应使用的目标 PlayingID：
+	//   - 若缓存中记录的 PlayingID 对应实例仍存活（IsPlayingIDActive），复用之以保证 Note-On/Note-Off 路由到同一实例；
+	//   - 若实例已自然结束（僵尸 ID）或无法校验，则丢弃失效缓存并返回 AK_INVALID_PLAYING_ID，让 Wwise 新建实例。
+	// 这是修复"相同参数第二次起没声音"的核心：避免复用已失效 PlayingID 导致 Wwise 丢弃消息。
+	AkPlayingID ResolveActivePlayingID(const TObjectKey<UAkAudioEvent>& EventKey, UAkAudioEvent* Event);
 
 	// 清理 ActivePlayingIDs 中因 Event 资产被 GC/卸载而失效的弱引用 key，防止 map 缓慢膨胀。
 	void PurgeStalePlayingIDs();

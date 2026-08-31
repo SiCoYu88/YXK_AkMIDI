@@ -27,7 +27,7 @@ public:
 		uint8 Data02);
 
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|Function")
-	static bool PostMidiEvent(
+	static int32 PostMidiEvent(
 		UAkMidiComponent* MidiComponent, 
 		TArray<UAkMidiMessage*> AkMidiMessages, 
 		UAkAudioEvent *AkEvent = nullptr);

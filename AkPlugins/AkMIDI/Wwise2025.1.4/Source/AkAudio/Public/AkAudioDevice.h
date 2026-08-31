@@ -1667,6 +1667,17 @@ private:
 
 	static void PostEventAtLocationEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo);
 
+#pragma region H3D
+	// MIDI 专用 EndOfEvent 回调：签名严格匹配原生 AkCallbackFunc（随 Wwise 版本不同为 2 参或 4 参）。
+	// 实例结束时从 EventToPlayingIDMap 移除对应 PlayingID，供 IsPlayingIDActive() 可靠判断实例是否仍存活，
+	// 避免 UAkMidiComponent 复用已失效的 PlayingID 导致后续 PostMIDIOnEvent 丢弃消息（"第二次起没声音"）。
+#if WWISE_2025_1_OR_LATER
+	static void MidiEndOfEventCallback(AkCallbackType in_eType, AkEventCallbackInfo* in_pEventInfo, void* in_pCallbackInfo, void* in_pCookie);
+#else
+	static void MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo);
+#endif
+#pragma endregion
+
 	static TMap<uint32, FOnSwitchValueLoaded> OnSwitchValueLoadedMap;
 
 	static TArray<TWeakObjectPtr<UAkAudioType>> AudioObjectsToLoadAfterInitialization;

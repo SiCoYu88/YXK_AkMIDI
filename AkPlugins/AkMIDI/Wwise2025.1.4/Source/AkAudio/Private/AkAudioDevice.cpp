@@ -4618,6 +4618,33 @@ AKRESULT FAkAudioDevice::RegisterPluginDLL(const FString& in_DllName, const FStr
 }
 
 #pragma region H3D
+#if WWISE_2025_1_OR_LATER
+void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkEventCallbackInfo* in_pEventInfo, void* in_pCallbackInfo, void* in_pCookie)
+{
+	SCOPED_AKAUDIO_EVENT_3(TEXT("FAkAudioDevice::MidiEndOfEventCallback"));
+	if (in_eType == AK_EndOfEvent && in_pEventInfo)
+	{
+		if (auto* Device = FAkAudioDevice::Get())
+		{
+			Device->RemovePlayingID(in_pEventInfo->eventID, in_pEventInfo->playingID);
+		}
+	}
+}
+#else
+void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo)
+{
+	SCOPED_AKAUDIO_EVENT_3(TEXT("FAkAudioDevice::MidiEndOfEventCallback"));
+	if (in_eType == AK_EndOfEvent && in_pCallbackInfo)
+	{
+		auto* EventInfo = static_cast<AkEventCallbackInfo*>(in_pCallbackInfo);
+		if (auto* Device = FAkAudioDevice::Get())
+		{
+			Device->RemovePlayingID(EventInfo->eventID, EventInfo->playingID);
+		}
+	}
+}
+#endif
+
 AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts, AkPlayingID in_playingID)
 {
 	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
@@ -4630,7 +4657,29 @@ AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectI
 		return AK_InvalidParameter;
 	}
 
-	return SoundEngine->PostMIDIOnEvent(EventID, in_gameObjectID, in_pPosts, in_uNumPosts, false, 0, NULL, NULL, in_playingID);
+	// 注册 AK_EndOfEvent 回调（MidiEndOfEventCallback，其签名严格匹配原生 AkCallbackFunc）。
+	// 目的：让引擎在 MIDI 播放实例自然结束时，自动把该 PlayingID 从 EventToPlayingIDMap 中移除，
+	// 从而使调用方可以通过 IsPlayingIDActive() 可靠判断某个 PlayingID 是否仍然有效，
+	// 避免复用已失效（僵尸）的 PlayingID 导致后续 Post 被 Wwise 丢弃而"没有声音"。
+	const AkPlayingID PlayingID = SoundEngine->PostMIDIOnEvent(
+		EventID, in_gameObjectID, in_pPosts, in_uNumPosts,
+		false,
+		AK_EndOfEvent,
+		&FAkAudioDevice::MidiEndOfEventCallback,
+		NULL,
+		in_playingID);
+
+	if (PlayingID != AK_INVALID_PLAYING_ID)
+	{
+		// 登记进 EventToPlayingIDMap，配合上面的 EndOfEvent 回调形成"登记—失效移除"闭环。
+		// 复用已有实例（in_playingID 有效）时无需重复登记。
+		if (in_playingID == AK_INVALID_PLAYING_ID)
+		{
+			AddPlayingID(EventID, PlayingID, EAkAudioContext::GameplayAudio);
+		}
+	}
+
+	return PlayingID;
 }
 
 AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkPlayingID in_playingID)
