@@ -2,6 +2,8 @@
 
 AkMIDI 为 Unreal Engine 的 Wwise 集成增加实时 MIDI 能力。它可以在 Unreal 中创建 MIDI 消息并发送给 Wwise，也可以读取外部 MIDI 设备、转发到 Wwise 或其他 MIDI 输出设备。
 
+版本升级和 `AkAudio` 定制迁移请参阅 [AkAudio H3DWwise 版本升级迁移指南](AkAudio_H3DWwise_版本升级迁移指南.md)。
+
 ## 功能概览
 
 - 在蓝图或 C++ 中创建并发送 Note On、Note Off、Aftertouch、CC、Program Change、Channel Aftertouch 和 Pitch Bend。
