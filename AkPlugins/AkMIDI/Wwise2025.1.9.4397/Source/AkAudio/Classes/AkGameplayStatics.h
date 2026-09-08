@@ -113,6 +113,73 @@ public:
 							bool bStopWhenAttachedToDestroyed = true
 							);
 
+#pragma region H3DWwise
+	/** Posts a Wwise Event and RenderAudio Immedially.
+	 *
+	 * @param AkEvent - Event to play.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category="Audiokinetic|Actor", meta=(AdvancedDisplay="2", AutoCreateRefTerm = "PostEventCallback"))
+	static int32 PostEvent_WithFlush(class UAkAudioEvent* AkEvent, bool bUseTransform = true);
+
+	/** Posts a Wwise Event attached to and following the root component of the specified actor.
+	 *
+	 * @param AkEvent - Event to play.
+	 * @param PlayingID - PostEvent return.
+	 * @param bUseAkMusicHierarchy - true is Interactive Music Hierarchy, false is Actor-Mixer Hierarchy.
+	 */
+	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
+	static int32 GetSourcePlayPosition(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy = false);
+
+
+	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
+
+	static int32 GetSourceActiveDuration(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy = false);
+
+	/** Posts a Wwise Event attached to and following the root component of the specified actor.
+	 *
+	 * @param AkEvent - Event to play.
+	 * @param Actor - Actor on which to play the event. If the Actor is left empty, the Event will be played as an Ambient sound.
+	 * @param PlayingID - PostEvent return.
+	 * @param OffsetMS - PostEvent and set seek to position with percent.
+	 */
+	UFUNCTION(BlueprintCallable,Category = "H3D | Wwise")
+	static int32 SeekOnEvent(UAkAudioEvent* AkEvent, class AActor* Actor, const int32 PlayingID, const float OffsetPercent);
+
+	/** Posts a Wwise Event attached to and following the root component of the specified actor.
+	 *
+	 * @param AkEvent - Event to play.
+	 * @param Actor - Actor on which to play the event. If the Actor is left empty, the Event will be played as an Ambient sound.
+	 * @param PlayingID - PostEvent return.
+	 * @param OffsetMS - PostEvent and set seek to position with offset, use milliseconds.
+	 */
+	UFUNCTION(BlueprintCallable,Category = "H3D | Wwise")
+	static int32 SeekOnEventWithMS(UAkAudioEvent* AkEvent, class AActor* Actor, const int32 PlayingID, const int32 OffsetMS);
+
+	/** Posts a Wwise Event at the specified location. This is a fire and forget sound, created on a temporary Wwise Game Object. Replication is also not handled at this point.
+	 *
+	 * @param AkEvent - Wwise Event to post.
+	 * @param WorldContextObject - World Context Object.
+	 * @param Location - Location from which to post the Wwise Event.
+	 * @param Orientation - Orientation of the event.
+	 * @param bStopWhenAttachedToDestroyed - Specifies whether the sound should stop playing when the owner of the attach to component is destroyed.
+	 * @param EventName - Deprecated: Event name in case the AkEvent is not set.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category="Audiokinetic|Actor", meta=(AdvancedDisplay="4", AutoCreateRefTerm = "PostEventCallback"))
+	static int32 PostEventAtLocationWithCallback(class UAkAudioEvent* AkEvent, UObject* WorldContextObject, FVector Location, FRotator Orientation,
+												UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/AkAudio.EAkCallbackType")) int32 CallbackMask,
+												const FOnAkPostEventCallback& PostEventCallback, bool bStopWhenAttachedToDestroyed = false);
+
+
+	UFUNCTION(BlueprintCallable,Category = "H3D | Wwise")
+	static int32 PostEventWithSeek(class UAkAudioEvent* AkEvent,
+									class AActor* Actor,
+									UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/AkAudio.EAkCallbackType")) int32 CallbackMask,
+									const FOnAkPostEventCallback& PostEventCallback,
+									bool bStopWhenAttachedToDestroyed = false, const int32 OffsetMS = 0);
+
+	static void LogWwiseInfo(const TCHAR* InFormat, ...);
+#pragma endregion
+
 	/**
 	 * Posts a Wwise Event attached to and following the root component of the specified actor, and waits for the end of the event to continue execution.
 	 * Additional calls made while an event is active are ignored.
@@ -701,3 +768,30 @@ private:
 	static FAkOutdoorsRoomParameters m_CurrentOutDoorsRoomParameters;
 
 };
+
+#pragma region H3DWwise
+namespace AKTools
+{
+	const static FString EnumToString(const FString& InEnumName, int32 InEnumValue)
+	{
+		/** 避免异步线程调用FindObject */
+		bool bInValid = UE::IsSavingPackage(nullptr) || !IsInGameThread();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1
+		bInValid |= IsGarbageCollecting() || IsGarbageCollectingAndLockingUObjectHashTables();
+#else
+		bInValid |= IsGarbageCollecting();
+#endif
+		if (bInValid)
+		{
+			return FString();
+		}
+		const UEnum* EnumPtr = FindObject<UEnum>(nullptr, *InEnumName);
+		if (EnumPtr)
+		{
+			const FString EnumString(EnumPtr->GetNameByValue(InEnumValue).ToString());
+			return EnumString;
+		}
+		return FString::FromInt(InEnumValue);
+	}
+}
+#pragma endregion

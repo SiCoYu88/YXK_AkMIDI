@@ -86,6 +86,10 @@ typedef TSet<TWeakObjectPtr<UAkComponent>,TWeakObjectPtrSetKeyFuncs<TWeakObjectP
 struct AKAUDIO_API FAkAudioDeviceDelegates
 {
 	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAkGlobalCallback, AK::IAkGlobalPluginContext*, AkGlobalCallbackLocation);
+#pragma region H3DWwise
+	// Callback delegate for AkMIDI module event posting.
+	DECLARE_DELEGATE_OneParam(FOnAkMIDIGlobalCallback, AkAudioSettings*);
+#pragma endregion
 };
 
 
@@ -919,6 +923,13 @@ public:
 	 */
 	FDelegateHandle RegisterGlobalCallback(FAkAudioDeviceDelegates::FOnAkGlobalCallback::FDelegate Callback, AkGlobalCallbackLocation Location);
 
+#pragma region H3DWwise
+	/**
+	 * AkMIDI global callback instance, bound by AkMIDI module.
+	 */
+	FAkAudioDeviceDelegates::FOnAkMIDIGlobalCallback OnMessageWaitToSend;
+#pragma endregion
+
 	/**
 	 * Unregisters a callback that can run within the global callback at a specific AkGlobalCallbackLocation.
 	 *
@@ -1270,6 +1281,36 @@ public:
 	 * Allows to register a Wwise plugin from a DLL name and path
 	 */
 	AKRESULT RegisterPluginDLL(const FString& in_DllName, const FString& in_DllPath);
+
+#pragma region H3DWwise
+	/**
+	 * Posts MIDI messages on a Wwise event for the specified game object.
+	 * @param in_playingID 目标播放实例 ID。首次调用传 AK_INVALID_PLAYING_ID（Wwise 创建新实例并返回其 ID），
+	 *                     后续批次（含 Note-Off）应传入之前保存的返回值，确保 Note-On/Note-Off 路由到同一实例。
+	 */
+	AkPlayingID PostMidiEvent(
+		UAkAudioEvent* in_Event,
+		AkGameObjectID in_gameObjectID,
+		AkMIDIPost* in_pPosts,
+		AkUInt16 in_uNumPosts,
+		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID,
+		AkUInt32 in_uFlags = AK_EndOfEvent,
+		AkCallbackFunc in_pfnCallback = nullptr,
+		void* in_pCookie = nullptr,
+		EAkAudioContext in_AudioContext = EAkAudioContext::GameplayAudio
+		);
+
+	/**
+	 * Stops MIDI playback on a Wwise event for the specified game object.
+	 * @param in_playingID 目标播放实例 ID。传入保存的 PlayingID 可精确停止指定实例；
+	 *                     传 AK_INVALID_PLAYING_ID 则停止该事件/对象上的全部 MIDI 实例。
+	 */
+	AKRESULT StopMidiEvent(
+		UAkAudioEvent* in_Event,
+		AkGameObjectID in_gameObjectID,
+		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID
+		);
+#pragma endregion
 
 	/**
 	* Gets the path where the SoundBanks are located on disk
@@ -1633,6 +1674,17 @@ private:
 	static TMap<uint32, EAkAudioContext> PlayingIDToAudioContextMap;
 
 	static void PostEventAtLocationEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo);
+
+#pragma region H3DWwise
+	// MIDI 专用 EndOfEvent 回调：签名严格匹配原生 AkCallbackFunc（随 Wwise 版本不同为 2 参或 4 参）。
+	// 实例结束时从 EventToPlayingIDMap 移除对应 PlayingID，供 IsPlayingIDActive() 可靠判断实例是否仍存活，
+	// 避免 UAkMidiComponent 复用已失效的 PlayingID 导致后续 PostMIDIOnEvent 丢弃消息（"第二次起没声音"）。
+#if WWISE_2025_1_OR_LATER
+	static void MidiEndOfEventCallback(AkCallbackType in_eType, AkEventCallbackInfo* in_pEventInfo, void* in_pCallbackInfo, void* in_pCookie);
+#else
+	static void MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo);
+#endif
+#pragma endregion
 
 	static TMap<uint32, FOnSwitchValueLoaded> OnSwitchValueLoadedMap;
 
