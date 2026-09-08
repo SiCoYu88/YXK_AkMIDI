@@ -4624,6 +4624,11 @@ void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkEventCall
 	SCOPED_AKAUDIO_EVENT_3(TEXT("FAkAudioDevice::MidiEndOfEventCallback"));
 	if (in_eType == AK_EndOfEvent && in_pEventInfo)
 	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("MIDI EndOfEvent received: EventID=%" PRIu32 ", PlayingID=%" PRIu32 ", GameObjectID=%" PRIu64),
+			in_pEventInfo->eventID, in_pEventInfo->playingID, in_pEventInfo->gameObjID);
+	}
+	if (in_eType == AK_EndOfEvent && in_pEventInfo)
+	{
 		if (auto* Device = FAkAudioDevice::Get())
 		{
 			Device->RemovePlayingID(in_pEventInfo->eventID, in_pEventInfo->playingID);
@@ -4637,6 +4642,8 @@ void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackI
 	if (in_eType == AK_EndOfEvent && in_pCallbackInfo)
 	{
 		auto* EventInfo = static_cast<AkEventCallbackInfo*>(in_pCallbackInfo);
+		UE_LOG(LogAkAudio, Verbose, TEXT("MIDI EndOfEvent received: EventID=%" PRIu32 ", PlayingID=%" PRIu32 ", GameObjectID=%" PRIu64),
+			EventInfo->eventID, EventInfo->playingID, EventInfo->gameObjID);
 		if (auto* Device = FAkAudioDevice::Get())
 		{
 			Device->RemovePlayingID(EventInfo->eventID, EventInfo->playingID);
@@ -4645,7 +4652,9 @@ void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackI
 }
 #endif
 
-AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts, AkPlayingID in_playingID)
+AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID,
+	AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts, AkPlayingID in_playingID,
+	AkUInt32 in_uFlags, AkCallbackFunc in_pfnCallback, void* in_pCookie, EAkAudioContext in_AudioContext)
 {
 	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
 	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
@@ -4661,12 +4670,19 @@ AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectI
 	// 目的：让引擎在 MIDI 播放实例自然结束时，自动把该 PlayingID 从 EventToPlayingIDMap 中移除，
 	// 从而使调用方可以通过 IsPlayingIDActive() 可靠判断某个 PlayingID 是否仍然有效，
 	// 避免复用已失效（僵尸）的 PlayingID 导致后续 Post 被 Wwise 丢弃而"没有声音"。
+	// Direct callers historically received the MIDI end callback automatically. UAkAudioEvent can
+	// now supply its regular callback package instead, so actor/component lifetime matches PostEvent.
+	if (in_uFlags != 0 && !in_pfnCallback)
+	{
+		in_pfnCallback = &FAkAudioDevice::MidiEndOfEventCallback;
+	}
+
 	const AkPlayingID PlayingID = SoundEngine->PostMIDIOnEvent(
 		EventID, in_gameObjectID, in_pPosts, in_uNumPosts,
 		false,
-		AK_EndOfEvent,
-		&FAkAudioDevice::MidiEndOfEventCallback,
-		NULL,
+		in_uFlags,
+		in_pfnCallback,
+		in_pCookie,
 		in_playingID);
 
 	if (PlayingID != AK_INVALID_PLAYING_ID)
@@ -4675,7 +4691,7 @@ AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectI
 		// 复用已有实例（in_playingID 有效）时无需重复登记。
 		if (in_playingID == AK_INVALID_PLAYING_ID)
 		{
-			AddPlayingID(EventID, PlayingID, EAkAudioContext::GameplayAudio);
+			AddPlayingID(EventID, PlayingID, in_AudioContext);
 		}
 	}
 
@@ -4694,7 +4710,17 @@ AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID i
 		return AK_InvalidParameter;
 	}
 
-	return SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID, in_playingID);
+	// StopMIDIOnEvent only releases notes associated with the Event. It does not
+	// necessarily terminate the Event instance, so AK_EndOfEvent would never be
+	// emitted for looped MIDI Events. Stop the tracked instance explicitly after
+	// releasing its notes, which makes the regular callback package receive the
+	// same EndOfEvent notification as PostEvent.
+	const AKRESULT MidiResult = SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID, in_playingID);
+	if (in_playingID != AK_INVALID_PLAYING_ID)
+	{
+		StopPlayingID(in_playingID);
+	}
+	return MidiResult;
 }
 #pragma endregion
 // end

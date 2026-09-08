@@ -379,6 +379,48 @@ public:
 		const EAkAudioContext AudioContext = EAkAudioContext::GameplayAudio);
 
 #pragma region H3DWwise
+	/** Posts MIDI messages on the root component of the specified actor. */
+	AkPlayingID PostMIDIOnActor(
+		const AActor* Actor,
+		AkMIDIPost* MidiPosts,
+		AkUInt16 NumPosts,
+		AkPlayingID PlayingID,
+		const FOnAkPostEventCallback* Delegate,
+		AkCallbackType CallbackMask,
+		bool bStopWhenAttachedObjectDestroyed,
+		EAkAudioContext AudioContext = EAkAudioContext::GameplayAudio);
+
+	/** Posts MIDI messages on the specified component. */
+	AkPlayingID PostMIDIOnComponent(
+		UAkComponent* Component,
+		AkMIDIPost* MidiPosts,
+		AkUInt16 NumPosts,
+		AkPlayingID PlayingID,
+		const FOnAkPostEventCallback* Delegate,
+		AkCallbackType CallbackMask,
+		bool bStopWhenAttachedObjectDestroyed,
+		EAkAudioContext AudioContext = EAkAudioContext::GameplayAudio);
+
+	/** Posts MIDI messages on the specified game object. */
+	AkPlayingID PostMIDIOnGameObject(
+		UAkGameObject* GameObject,
+		AkMIDIPost* MidiPosts,
+		AkUInt16 NumPosts,
+		AkPlayingID PlayingID = AK_INVALID_PLAYING_ID,
+		const FOnAkPostEventCallback* Delegate = nullptr,
+		AkCallbackType CallbackMask = static_cast<AkCallbackType>(0),
+		EAkAudioContext AudioContext = EAkAudioContext::GameplayAudio);
+
+	/** Posts MIDI messages on the specified game object ID. */
+	AkPlayingID PostMIDIOnGameObjectID(
+		AkGameObjectID GameObjectID,
+		AkMIDIPost* MidiPosts,
+		AkUInt16 NumPosts,
+		AkPlayingID PlayingID = AK_INVALID_PLAYING_ID,
+		const FOnAkPostEventCallback* Delegate = nullptr,
+		AkCallbackType CallbackMask = static_cast<AkCallbackType>(0),
+		EAkAudioContext AudioContext = EAkAudioContext::GameplayAudio);
+
 	/**
 	 * @brief Posts the Wwise Event on the specified game object ID.
 	 *

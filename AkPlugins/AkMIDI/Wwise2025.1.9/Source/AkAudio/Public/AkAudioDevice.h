@@ -1292,7 +1292,11 @@ public:
 		AkGameObjectID in_gameObjectID,
 		AkMIDIPost* in_pPosts,
 		AkUInt16 in_uNumPosts,
-		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID
+		AkPlayingID in_playingID = AK_INVALID_PLAYING_ID,
+		AkUInt32 in_uFlags = AK_EndOfEvent,
+		AkCallbackFunc in_pfnCallback = nullptr,
+		void* in_pCookie = nullptr,
+		EAkAudioContext in_AudioContext = EAkAudioContext::GameplayAudio
 		);
 
 	/**

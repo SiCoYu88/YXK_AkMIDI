@@ -546,6 +546,158 @@ AkPlayingID UAkAudioEvent::PostOnGameObjectID(const AkGameObjectID GameObjectID,
 
 #pragma region H3DWwise
 
+AkPlayingID UAkAudioEvent::PostMIDIOnActor(const AActor* Actor, AkMIDIPost* MidiPosts, AkUInt16 NumPosts,
+	AkPlayingID PlayingID, const FOnAkPostEventCallback* Delegate, AkCallbackType CallbackMask,
+	bool bStopWhenAttachedObjectDestroyed, EAkAudioContext AudioContext)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("UAkAudioEvent::PostMIDIOnActor"));
+	const auto* AudioDevice = FAkAudioDevice::Get();
+	if (UNLIKELY(!AudioDevice || !AudioDevice->IsInitialized()))
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("Failed to post MIDI on AkAudioEvent '%s' without an initialized Audio Device."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	if (!Actor)
+	{
+		return PostMIDIOnGameObjectID(DUMMY_GAMEOBJ, MidiPosts, NumPosts, PlayingID, Delegate, CallbackMask, AudioContext);
+	}
+
+	if (UNLIKELY(!IsValid(Actor) || Actor->IsActorBeingDestroyed()))
+	{
+		UE_LOG(LogAkAudio, Error, TEXT("Failed to post MIDI on AkAudioEvent '%s' with an actor that's not valid."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	const auto* World = Actor->GetWorld();
+	if (UNLIKELY(!World || !World->AllowAudioPlayback()))
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("Failed to post MIDI on AkAudioEvent '%s' because the actor's world does not allow audio playback."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	UAkComponent* Component = AudioDevice->GetAkComponent(
+		Actor->GetRootComponent(), FName(), nullptr, EAttachLocation::KeepRelativeOffset);
+	if (UNLIKELY(!Component))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("Failed to post MIDI on AkAudioEvent '%s' with an actor that doesn't have an AkComponent on Root."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	return PostMIDIOnComponent(Component, MidiPosts, NumPosts, PlayingID, Delegate, CallbackMask,
+		bStopWhenAttachedObjectDestroyed, AudioContext);
+}
+
+AkPlayingID UAkAudioEvent::PostMIDIOnComponent(UAkComponent* Component, AkMIDIPost* MidiPosts, AkUInt16 NumPosts,
+	AkPlayingID PlayingID, const FOnAkPostEventCallback* Delegate, AkCallbackType CallbackMask,
+	bool bStopWhenAttachedObjectDestroyed, EAkAudioContext AudioContext)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("UAkAudioEvent::PostMIDIOnComponent"));
+	if (UNLIKELY(!IsValid(Component)))
+	{
+		UE_LOG(LogAkAudio, Error, TEXT("Failed to post MIDI on AkAudioEvent '%s' with an AkComponent that's not valid."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	Component->StopWhenOwnerDestroyed = bStopWhenAttachedObjectDestroyed;
+	return PostMIDIOnGameObject(Component, MidiPosts, NumPosts, PlayingID, Delegate, CallbackMask, AudioContext);
+}
+
+AkPlayingID UAkAudioEvent::PostMIDIOnGameObject(UAkGameObject* GameObject, AkMIDIPost* MidiPosts, AkUInt16 NumPosts,
+	AkPlayingID PlayingID, const FOnAkPostEventCallback* Delegate, AkCallbackType CallbackMask,
+	EAkAudioContext AudioContext)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("UAkAudioEvent::PostMIDIOnGameObject"));
+	if (UNLIKELY(!IsValid(GameObject)))
+	{
+		UE_LOG(LogAkAudio, Error, TEXT("Failed to post MIDI on AkAudioEvent '%s' without a valid GameObject."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	GameObject->UpdateObstructionAndOcclusion();
+	const AkPlayingID Result = PostMIDIOnGameObjectID(
+		GameObject->GetAkGameObjectID(), MidiPosts, NumPosts, PlayingID, Delegate, CallbackMask, AudioContext);
+	if (Result != AK_INVALID_PLAYING_ID)
+	{
+		GameObject->EventPosted();
+	}
+	return Result;
+}
+
+AkPlayingID UAkAudioEvent::PostMIDIOnGameObjectID(AkGameObjectID GameObjectID, AkMIDIPost* MidiPosts,
+	AkUInt16 NumPosts, AkPlayingID PlayingID, const FOnAkPostEventCallback* Delegate,
+	AkCallbackType CallbackMask, EAkAudioContext AudioContext)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("UAkAudioEvent::PostMIDIOnGameObjectID"));
+	auto* AudioDevice = FAkAudioDevice::Get();
+	if (UNLIKELY(!AudioDevice || !AudioDevice->IsInitialized()))
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("Failed to post MIDI on AkAudioEvent '%s' without an initialized Audio Device."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	if (UNLIKELY(!MidiPosts || NumPosts == 0))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("Failed to post MIDI on AkAudioEvent '%s': no MIDI messages were supplied."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	if (UNLIKELY(!IsLoaded() || !IsDataFullyLoaded()))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("Failed to post MIDI on AkAudioEvent '%s': Event data is not fully loaded."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	IAkUserEventCallbackPackage* CallbackPackage = nullptr;
+	AkUInt32 SoundEngineCallbackMask = 0;
+	AkCallbackFunc SoundEngineCallback = nullptr;
+	if (PlayingID == AK_INVALID_PLAYING_ID)
+	{
+		auto* CallbackManager = AudioDevice->GetCallbackManager();
+		if (UNLIKELY(!CallbackManager))
+		{
+			UE_LOG(LogAkAudio, Warning, TEXT("Failed to post MIDI on AkAudioEvent '%s' without a Callback Manager."), *GetName());
+			return AK_INVALID_PLAYING_ID;
+		}
+
+		if (Delegate)
+		{
+			CallbackPackage = CallbackManager->CreateCallbackPackage(*Delegate, CallbackMask, GameObjectID, false);
+		}
+		else
+		{
+			CallbackPackage = CallbackManager->CreateCallbackPackage(
+				static_cast<AkCallbackFunc>(nullptr), nullptr, 0, GameObjectID, false);
+		}
+
+		if (UNLIKELY(!CallbackPackage))
+		{
+			UE_LOG(LogAkAudio, Warning, TEXT("Failed to post MIDI on AkAudioEvent '%s': Could not create CallbackPackage."), *GetName());
+			return AK_INVALID_PLAYING_ID;
+		}
+
+		SoundEngineCallbackMask = CallbackPackage->uUserFlags | AK_EndOfEvent;
+		SoundEngineCallback = &FAkComponentCallbackManager::AkComponentCallback;
+	}
+
+	const AkPlayingID Result = AudioDevice->PostMidiEvent(
+		this, GameObjectID, MidiPosts, NumPosts, PlayingID, SoundEngineCallbackMask,
+		SoundEngineCallback, CallbackPackage, AudioContext);
+
+	if (UNLIKELY(Result == AK_INVALID_PLAYING_ID))
+	{
+		if (CallbackPackage)
+		{
+			AudioDevice->GetCallbackManager()->RemoveCallbackPackage(CallbackPackage, GameObjectID);
+		}
+		UE_LOG(LogAkAudio, Log, TEXT("Failed to post MIDI on AkAudioEvent '%s'."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	UE_LOG(LogAkAudio, Log, TEXT("Posted MIDI on AkAudioEvent '%s' as PlayingId %" PRIu32 "."), *GetName(), Result);
+	return Result;
+}
+
 int32 UAkAudioEvent::GetSourcePlayPosition(int32 PlayingID)
 {
 	SCOPED_AKAUDIO_EVENT_2(TEXT("UAkAudioEvent::GetSourcePlayPosition"));
