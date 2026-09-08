@@ -7,7 +7,8 @@ cd /d "%PROJECT_ROOT%"
 if not defined WWISE_2025_1_10_ROOT set "WWISE_2025_1_10_ROOT=H:\Audiokinetic\2025.1.10.9233"
 set "WWISEROOT=%WWISE_2025_1_10_ROOT%"
 if not defined PLUGIN_VERSION set "PLUGIN_VERSION=2025.1.10.9233"
-set "PYTHONUTF8=1"
+rem VSWhere emits localized text in the active Windows code page.
+set "PYTHONUTF8=0"
 set "WP=%WWISEROOT%\Scripts\Build\Plugins\wp.py"
 
 set "ACTION=%~1"
