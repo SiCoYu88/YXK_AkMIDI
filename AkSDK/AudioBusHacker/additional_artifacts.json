@@ -18,6 +18,13 @@
                 "SoundEnginePlugin/AudioBusHackerFXFactory.h"
             ]
         }
+    ],
+    "Windows_vc180": [
+        {
+            "SDK/include/AK/Plugin": [
+                "SoundEnginePlugin/AudioBusHackerFXFactory.h"
+            ]
+        }
     ]
 
     // List of additional files to package for the <DeploymentPlatform> platform

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- VS 18.9 may select an uninstalled 14.51 toolset. Keep vc180 on the
+       installed v145 toolset version without affecting vc160/vc170 projects. -->
+  <PropertyGroup Condition="'$(MSBuildProjectFile)' == 'AudioBusHacker_Windows_vc180_static.vcxproj' Or '$(MSBuildProjectFile)' == 'AudioBusHacker_Windows_vc180_shared.vcxproj'">
+    <VCToolsVersion>14.50.35717</VCToolsVersion>
+  </PropertyGroup>
+</Project>

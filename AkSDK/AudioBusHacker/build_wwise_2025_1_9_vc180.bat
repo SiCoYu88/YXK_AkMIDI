@@ -180,12 +180,23 @@ exit /b 0
 echo.
 echo ===== Verify x64 vc180 SDK outputs =====
 set "VERIFY_FAILED=0"
+set "SDK_PACKAGE=%PROJECT_ROOT%AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz"
 
 call :check_file "%WWISEROOT%\SDK\x64_vc180\Debug\bin\AudioBusHacker.dll"
 call :check_file "%WWISEROOT%\SDK\x64_vc180\Profile\lib\AudioBusHackerFX.lib"
 call :check_file "%WWISEROOT%\SDK\x64_vc180\Release\bin\AudioBusHacker.dll"
-call :check_file "%WWISEROOT%\SDK\include\AK\Plugin\AudioBusHackerFXFactory.h"
-call :check_file "%PROJECT_ROOT%AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz"
+call :check_file "%PROJECT_ROOT%SoundEnginePlugin\AudioBusHackerFXFactory.h"
+call :check_file "%SDK_PACKAGE%"
+
+if "%VERIFY_FAILED%"=="0" (
+    call %PYTHON_LAUNCHER% -c "import tarfile; p=r'%SDK_PACKAGE%'; expected='SDK/include/AK/Plugin/AudioBusHackerFXFactory.h'; names=(n.replace(chr(92), '/').lstrip('./') for n in tarfile.open(p, 'r:xz').getnames()); raise SystemExit(0 if any(n.endswith(expected) for n in names) else 1)"
+    if errorlevel 1 (
+        echo [MISSING] %SDK_PACKAGE%::SDK/include/AK/Plugin/AudioBusHackerFXFactory.h
+        set "VERIFY_FAILED=1"
+    ) else (
+        echo [OK] %SDK_PACKAGE%::SDK/include/AK/Plugin/AudioBusHackerFXFactory.h
+    )
+)
 
 if "%VERIFY_FAILED%"=="1" (
     set "FAILED_STEP=Verify outputs"
