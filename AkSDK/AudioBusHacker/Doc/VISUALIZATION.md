@@ -8,11 +8,20 @@ AudioBusHacker 在 Bus 插入点分析 `AkAudioBuffer`，以约 25 Hz 生成固�
 SoundEnginePlugin/AudioBusHackerFXFactory.h
 ```
 
-Authoring 构建后，该头文件会安装到：
+安装对应 SDK 包后，该头文件位于：
 
 ```text
-G:\Wwise2025.1.4.9062\SDK\include\AK\Plugin\AudioBusHackerFXFactory.h
+%WWISEROOT%\SDK\include\AK\Plugin\AudioBusHackerFXFactory.h
 ```
+
+当前同时保留 Wwise 2025.1.4 / vc170 和 Wwise 2025.1.9 / vc180。两个 SDK 包都通过 `additional_artifacts.json` 安装同一份公共头，但二进制库必须按 Wwise 版本和工具链分别选择：
+
+```text
+%WWISEROOT%\SDK\x64_vc170\<Config>\lib\AudioBusHackerFX.lib
+%WWISEROOT%\SDK\x64_vc180\<Config>\lib\AudioBusHackerFX.lib
+```
+
+不要在同一应用中同时链接 vc170 和 vc180 版本。
 
 ## 数据内容
 

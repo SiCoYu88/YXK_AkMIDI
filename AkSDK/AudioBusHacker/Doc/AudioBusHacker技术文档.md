@@ -4,10 +4,13 @@
 
 本文说明 AudioBusHacker 的代码结构、运行时数据流、公共回调 API、线程约束、编译、打包和验证方法。
 
-本文以仓库当前源码为准：
+本文以仓库当前源码和已验证构建为准：
 
-- Wwise SDK：`2025.1.4.9062`
-- Windows 工具集：Visual Studio 2022 / MSVC v143（`vc170`）
+| Wwise SDK | Windows 工具链 | 已验证范围 |
+| --- | --- | --- |
+| `2025.1.4.9062` | Visual Studio 2022 / MSVC v143（`vc170`） | SoundEngine、Authoring、Documentation |
+| `2025.1.9.9197` | Visual Studio 2026 / v145（`vc180`）、MSVC `14.50.35717` | SoundEngine、SDK 打包 |
+
 - Windows 架构：`x64`
 - 插件类型：Wwise In-Place Effect
 - Company ID：`64`
@@ -40,7 +43,9 @@ AudioBusHacker 插入 Wwise Bus 后读取该插入点的 `AkAudioBuffer`。当�
 | `WwisePlugin/Win32/AudioBusHackerPluginGUI.*` | 接收 Authoring Monitor 数据；当前未实现绘图控件 |
 | `FactoryAssets/Manifest.xml` | Factory Assets 依赖声明 |
 | `additional_artifacts.json` | 安装包附加文件映射 |
-| `build_wwise_2025_1_4.bat` | 生成、编译、文档、打包和验证入口 |
+| `build_wwise_2025_1_4.bat` | Wwise 2025.1.4 / vc170 的生成、编译、文档、打包和验证入口 |
+| `build_wwise_2025_1_9_vc180.bat` | Wwise 2025.1.9 / vc180 的 SoundEngine 生成、编译、SDK 打包和验证入口 |
+| `SoundEnginePlugin/Directory.Build.props` | 仅为 vc180 工程固定已安装的 MSVC `14.50.35717` |
 | `Doc/VISUALIZATION.md` | 可视化数据协议的简明说明 |
 
 ## 4. 运行时架构
@@ -361,7 +366,54 @@ AudioBusHacker_v2025.1.4_Build9062_Authoring.Windows_x64.Debug.tar.xz
 AudioBusHacker_v2025.1.4_Build9062_Authoring.Windows_x64.Release.tar.xz
 ```
 
-### 9.5 Android 状态
+### 9.5 Wwise 2025.1.9 / vc180
+
+vc170 流程继续保留。vc180 使用独立入口：
+
+```bat
+set "WWISEROOT=H:\Audiokinetic\2025.1.9.9197"
+set "PYTHON_EXE=C:\Path\To\Python3\python.exe"
+build_wwise_2025_1_9_vc180.bat all
+```
+
+也可以分步执行：
+
+```bat
+build_wwise_2025_1_9_vc180.bat premake
+build_wwise_2025_1_9_vc180.bat build
+build_wwise_2025_1_9_vc180.bat package
+build_wwise_2025_1_9_vc180.bat verify
+```
+
+该脚本生成 `Windows_vc180` 的 VS 2026 `.slnx`/`.vcxproj`，编译 x64 Debug、Profile、Release、对应 StaticCRT 静态库及共享 DLL。主要产物位于：
+
+```text
+%WWISEROOT%\SDK\x64_vc180\Debug
+%WWISEROOT%\SDK\x64_vc180\Profile
+%WWISEROOT%\SDK\x64_vc180\Profile(StaticCRT)
+%WWISEROOT%\SDK\x64_vc180\Release
+%WWISEROOT%\SDK\x64_vc180\Release(StaticCRT)
+```
+
+生成的 SDK 包为：
+
+```text
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz
+```
+
+VS 2026 `18.9` 的默认工具集文件可能指向未安装的 `14.51.36231`。本工程的 `SoundEnginePlugin/Directory.Build.props` 只对两个 vc180 项目设置 `VCToolsVersion=14.50.35717`，不会影响 vc160/vc170，也能在 Premake 重新生成项目后继续生效。
+
+Wwise 2025.1.9 当前没有启用 vc180 Authoring 平台，因此 vc180 脚本不构建 Authoring 和 Property Help。Authoring 包继续由对应 Wwise 2025.1.9 的 vc170 Authoring 流程提供。
+
+`additional_artifacts.json` 同时为 `Windows_vc170` 和 `Windows_vc180` 打包 Factory 头。vc180 的 `verify` 会打开 `.tar.xz` 检查以下路径：
+
+```text
+SDK/include/AK/Plugin/AudioBusHackerFXFactory.h
+```
+
+2026-09-08 已在未安装 MSVC `14.51.36231` 的环境中完整执行 `build_wwise_2025_1_9_vc180.bat all`，所有步骤通过。
+
+### 9.6 Android 状态
 
 仓库中的 Android `.mk` 仍属于 2023.1 生成物。当前没有完成 Wwise 2025.1.4 Android 平台迁移和验证，不能把这些文件视为可发布产物。补装对应 Wwise Android 平台包后，必须重新 Premake、编译、部署并在真机验证。
 
@@ -392,7 +444,7 @@ extern "C" AK_DLLEXPORT int SetAudioBusHackerVisualizationCallback(...);
 
 编译后至少完成以下检查：
 
-- `build_wwise_2025_1_4.bat verify` 通过。
+- 所选工具链的验证命令通过：vc170 使用 `build_wwise_2025_1_4.bat verify`，vc180 使用 `build_wwise_2025_1_9_vc180.bat verify`。
 - Wwise Authoring 能创建 AudioBusHacker Effect 并生成 SoundBank。
 - 将 Effect 插入正在输出声音的 Bus 后，外部回调约 25 Hz 收到数据。
 - `uBusID` 与目标 Bus 的 Short ID 一致。
@@ -411,6 +463,6 @@ extern "C" AK_DLLEXPORT int SetAudioBusHackerVisualizationCallback(...);
 - 当前 Authoring GUI 只接收 Monitor 快照，没有实现可见的电平、波形或频谱绘制。
 - `Placeholder` 参数不参与实际处理。
 - Audio Object 路径未作为已验证能力。
-- Android 的 Wwise 2025.1.4 构建尚未验证。
+- Android 的 Wwise 2025.1.4/2025.1.9 构建尚未验证。
 
-更精简的数据协议说明见 [VISUALIZATION.md](VISUALIZATION.md)，现有迁移记录见仓库根目录的 [BUILD.md](../BUILD.md)。
+更精简的数据协议说明见 [VISUALIZATION.md](VISUALIZATION.md)，构建和迁移记录见 [BUILD.md](BUILD.md)。

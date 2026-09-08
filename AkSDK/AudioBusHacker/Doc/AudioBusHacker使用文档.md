@@ -14,11 +14,14 @@ AudioBusHacker 用于读取 Wwise Bus 插入点的混合音频，并向游戏、
 
 ## 2. 版本与限制
 
-当前发布目标是：
+当前保留两套 Windows 目标：
 
-- Wwise `2025.1.4.9062`
-- Windows `x64`
-- Visual Studio 2022 / `vc170`
+| Wwise | 工具链 | 用途 |
+| --- | --- | --- |
+| `2025.1.4.9062` | Visual Studio 2022 / `vc170` | 原有 SoundEngine 与 Authoring 流程 |
+| `2025.1.9.9197` | Visual Studio 2026 / `vc180` / MSVC `14.50.35717` | 新增 SoundEngine 与 SDK 包 |
+
+两套目标均为 Windows `x64`。应用必须选择与自身 Wwise SDK 和编译工具链一致的插件包，不能交叉链接。
 
 请不要把 `LegacyPackages` 中的 Wwise 2023.1.6.8555 包安装到 Wwise 2025.1。
 
@@ -27,13 +30,13 @@ AudioBusHacker 用于读取 Wwise Bus 插入点的混合音频，并向游戏、
 - Wwise Authoring 中没有内置的可视化绘图面板；可视化由外部程序或游戏 UI 完成。
 - 属性面板中的 `Placeholder` 是模板遗留参数，不影响声音和分析结果。
 - 只把 Bus 插入作为已验证路径，不建议用于 Audio Object。
-- Wwise 2025.1.4 Android 版本尚未验证。
+- Wwise 2025.1.4 和 2025.1.9 的 Android 版本均尚未验证。
 
 ## 3. 安装
 
 ### 3.1 本机开发构建
 
-如果本机有源码和 Wwise SDK，在插件根目录运行：
+如果本机使用 Wwise 2025.1.4 / vc170，在插件根目录运行：
 
 ```bat
 set "WWISEROOT=G:\Wwise2025.1.4.9062"
@@ -44,9 +47,22 @@ build_wwise_2025_1_4.bat verify
 
 构建工具会把 Authoring 插件和 SoundEngine 产物部署到 `WWISEROOT` 对应目录。构建前关闭 Wwise Authoring，避免插件 DLL 被占用。
 
+使用 Wwise 2025.1.9 / vc180 时运行：
+
+```bat
+set "WWISEROOT=H:\Audiokinetic\2025.1.9.9197"
+set "PYTHON_EXE=C:\Path\To\Python3\python.exe"
+build_wwise_2025_1_9_vc180.bat build
+build_wwise_2025_1_9_vc180.bat verify
+```
+
+无参数运行 `build_wwise_2025_1_9_vc180.bat` 等同于 `all`，会依次生成工程、编译、打包和验证。该流程使用仓库内的 `SoundEnginePlugin/Directory.Build.props` 固定 MSVC `14.50.35717`，不需要安装 `14.51.36231`。
+
+vc180 脚本不构建 Authoring；Wwise 2025.1.9 的 Authoring 插件继续使用对应版本的 Authoring 包。
+
 ### 3.2 使用发布包
 
-发布目录包含：
+保留的 Wwise 2025.1.4 / vc170 发布文件包括：
 
 ```text
 bundle.json
@@ -55,7 +71,17 @@ AudioBusHacker_v2025.1.4_Build9062_Authoring.Windows_x64.Debug.tar.xz
 AudioBusHacker_v2025.1.4_Build9062_SDK.Windows_vc170.tar.xz
 ```
 
-通过 Wwise Launcher 的插件安装入口添加包含 `bundle.json` 和三个包的目录，并为 Wwise 2025.1 安装 Authoring Release 与 Windows vc170 SDK 包。不同 Launcher 版本的入口文字可能不同；安装时以目标 Wwise 版本显示为 `2025.1`、插件名显示为 `AudioBusHacker` 为准。
+Wwise 2025.1.9 bundle 可同时包含：
+
+```text
+bundle.json
+AudioBusHacker_v2025.1.9_Build9197_Authoring.Windows_x64.Release.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_Authoring.Windows_x64.Debug.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc170.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz
+```
+
+通过 Wwise Launcher 的插件安装入口添加包含 `bundle.json` 和对应包的目录。安装 Authoring Release 后，再按应用工具链选择 Windows vc170 或 vc180 SDK 包。不要在同一应用中同时链接两套 SDK 包。不同 Launcher 版本的入口文字可能不同；安装时以目标 Wwise 版本显示为 `2025.1`、插件名显示为 `AudioBusHacker` 为准。
 
 Debug Authoring 包只用于调试 Authoring 插件，普通使用安装 Release 即可。
 
@@ -68,6 +94,7 @@ Debug Authoring 包只用于调试 Authoring 插件，普通使用安装 Release
 %WWISEROOT%\Authoring\x64\Release\bin\Plugins\AudioBusHacker.xml
 %WWISEROOT%\SDK\include\AK\Plugin\AudioBusHackerFXFactory.h
 %WWISEROOT%\SDK\x64_vc170\Profile\lib\AudioBusHackerFX.lib
+%WWISEROOT%\SDK\x64_vc180\Profile\lib\AudioBusHackerFX.lib
 ```
 
 重新启动 Wwise Authoring。若 Wwise 在安装时保持打开，插件列表可能不会刷新。
@@ -91,11 +118,11 @@ Debug Authoring 包只用于调试 Authoring 插件，普通使用安装 Release
 
 将与应用配置匹配的 `AudioBusHackerFX.lib` 加入链接依赖，并确保运行时部署了对应插件。典型选择是：
 
-| 应用配置 | 推荐插件产物 |
-| --- | --- |
-| Debug | `SDK/x64_vc170/Debug` |
-| 日常开发/Profile | `SDK/x64_vc170/Profile` |
-| Shipping/Release | `SDK/x64_vc170/Release` |
+| 应用配置 | vc170 | vc180 |
+| --- | --- | --- |
+| Debug | `SDK/x64_vc170/Debug` | `SDK/x64_vc180/Debug` |
+| 日常开发/Profile | `SDK/x64_vc170/Profile` | `SDK/x64_vc180/Profile` |
+| Shipping/Release | `SDK/x64_vc170/Release` | `SDK/x64_vc180/Release` |
 
 不要混用 Wwise 版本、架构、MSVC 工具集或 CRT 类型。
 
@@ -306,13 +333,14 @@ Release SoundEngine 中 `PostMonitorData()` 不可用，这是 Wwise 优化构�
 
 ## 11. 最短使用清单
 
-1. 安装与 Wwise 2025.1.4.9062 匹配的 Authoring 和 Windows vc170 SDK 包。
-2. 在目标 Bus 的 Insert Effect 中添加 AudioBusHacker。
-3. 重新生成并部署 SoundBank。
-4. 应用链接正确配置的 `AudioBusHackerFX.lib`。
-5. 注册 `SetAudioBusHackerVisualizationCallback()`。
-6. 音频线程只复制数据到无锁队列。
-7. UI 线程按 `uBusID` 消费并绘制最新快照。
-8. 模块退出或 SoundEngine 终止前注销回调。
+1. 确定目标组合：Wwise 2025.1.4 / vc170，或 Wwise 2025.1.9 / vc180。
+2. 安装与目标 Wwise 版本匹配的 Authoring 包，并只选择对应工具链的 Windows SDK 包。
+3. 在目标 Bus 的 Insert Effect 中添加 AudioBusHacker。
+4. 重新生成并部署 SoundBank。
+5. 应用链接正确工具链和配置的 `AudioBusHackerFX.lib`。
+6. 注册 `SetAudioBusHackerVisualizationCallback()`。
+7. 音频线程只复制数据到无锁队列。
+8. UI 线程按 `uBusID` 消费并绘制最新快照。
+9. 模块退出或 SoundEngine 终止前注销回调。
 
 编译和代码设计细节见 [AudioBusHacker技术文档.md](AudioBusHacker技术文档.md)，字段协议速查见 [VISUALIZATION.md](VISUALIZATION.md)。

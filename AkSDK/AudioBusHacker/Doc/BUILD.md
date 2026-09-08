@@ -1,8 +1,8 @@
 # AudioBusHacker 编译指南
 
-本文参考 Audiokinetic Wwise SDK 2025.1.4 的[“针对不同的 Wwise 平台构建工程”](https://www.audiokinetic.com/zh/public-library/2025.1.4_9062/?source=SDK&id=effectplugin_tools_building.html)说明，并记录本工程已验证的迁移和构建流程。
+本文记录 AudioBusHacker 已验证的 Windows 构建流程。原有 Wwise 2025.1.4 / vc170 流程完整保留，并新增 Wwise 2025.1.9 / vc180 流程。
 
-## 1. 当前目标
+## 1. vc170 基线（保留）
 
 - Wwise：`2025.1.4.9062`
 - 安装目录：`G:\Wwise2025.1.4.9062`
@@ -12,6 +12,15 @@
 - bundle 版本：`2025.1.4.9062`
 
 工程最初来自 Wwise 2023.1.6.8555。`vc170` 解决方案现已用 2025.1.4 Premake 重新生成；旧 2023 安装包保存在 `LegacyPackages`，不能安装到 Wwise 2025.1。
+
+当前已验证的 Windows 组合：
+
+| Wwise | 工具链 | 范围 | 构建入口 |
+| --- | --- | --- | --- |
+| `2025.1.4.9062` | VS 2022 / vc170 | SoundEngine、Authoring、Documentation、打包 | `build_wwise_2025_1_4.bat` |
+| `2025.1.9.9197` | VS 2026 / vc180 / MSVC `14.50.35717` | SoundEngine、SDK 打包 | `build_wwise_2025_1_9_vc180.bat` |
+
+两套产物不能跨 Wwise 版本或工具链混用。vc180 当前不替代 vc170；需要 Authoring 插件时仍使用与 Wwise 版本匹配的 Authoring 包。
 
 Bus 电平、波形、频谱和立体声相关度的数据协议及接入方式见 [VISUALIZATION.md](VISUALIZATION.md)。
 
@@ -355,4 +364,132 @@ $Wp = Join-Path $env:WWISEROOT "Scripts\Build\Plugins\wp.py"
 & $Python $Wp build Authoring_Windows -c Release -x x64 -t vc170
 & $Python -m pip install markdown jinja2
 & $Python $Wp build Documentation
+```
+
+## 14. Wwise 2025.1.9 / vc180
+
+### 14.1 已验证环境
+
+- Wwise：`2025.1.9.9197`
+- 安装目录：`H:\Audiokinetic\2025.1.9.9197`
+- Visual Studio：Visual Studio Community 2026
+- 平台工具集：`v145`（Wwise 名称为 `vc180`）
+- MSVC：`14.50.35717`
+- 架构：`x64`
+- 已验证：Premake、SoundEngine Debug/Profile/Release、StaticCRT、共享 DLL、SDK 打包和校验
+
+Wwise 2025.1.9 的 `Authoring_Windows` 平台脚本没有启用 vc180，因此 `build_wwise_2025_1_9_vc180.bat` 只负责 SoundEngine 和 SDK 包。Authoring Debug/Release 包继续由 Wwise 2025.1.9 的 vc170 Authoring 流程生成。
+
+### 14.2 快捷构建
+
+完整执行：
+
+```bat
+build_wwise_2025_1_9_vc180.bat all
+```
+
+无参数运行也默认执行 `all`。可以分步执行：
+
+```bat
+build_wwise_2025_1_9_vc180.bat premake
+build_wwise_2025_1_9_vc180.bat build
+build_wwise_2025_1_9_vc180.bat package
+build_wwise_2025_1_9_vc180.bat verify
+```
+
+默认环境如下；安装路径不同时可在运行前覆盖：
+
+```bat
+set "WWISEROOT=H:\Audiokinetic\2025.1.9.9197"
+set "PYTHON_EXE=C:\Path\To\Python3\python.exe"
+build_wwise_2025_1_9_vc180.bat all
+```
+
+### 14.3 固定使用 MSVC 14.50
+
+VS 2026 `18.9` 可能在默认配置中选择 `14.51.36231`，即使机器只安装了 `14.50.35717`。仅在批处理中设置 `VCToolsVersion` 不够，因为 `wp.py` 会调用 `VsMSBuildCmd.bat`，随后 MSBuild 会重新读取 VS 默认工具集。
+
+本工程通过以下文件解决：
+
+```text
+SoundEnginePlugin/Directory.Build.props
+```
+
+该文件只匹配两个 vc180 工程，并设置：
+
+```xml
+<VCToolsVersion>14.50.35717</VCToolsVersion>
+```
+
+vc160 和 vc170 工程不受影响。执行 Premake 后该文件仍会保留，因此不需要编辑生成的 `.vcxproj`，也不要修改 Visual Studio 安装目录内的 `Microsoft.VCToolsVersion.*.txt`。
+
+若出现以下错误：
+
+```text
+error MSB8070: 找不到 MSVC 工具集版本“14.51.36231”
+```
+
+先确认：
+
+```text
+C:\Program Files\Microsoft Visual Studio\18\Community\
+  VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64\cl.exe
+
+SoundEnginePlugin\Directory.Build.props
+```
+
+两者都必须存在。
+
+### 14.4 vc180 产物
+
+主要编译产物：
+
+```text
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Debug\bin\AudioBusHacker.dll
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Profile\lib\AudioBusHackerFX.lib
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Profile(StaticCRT)\lib\AudioBusHackerFX.lib
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Release\bin\AudioBusHacker.dll
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Release\lib\AudioBusHackerFX.lib
+H:\Audiokinetic\2025.1.9.9197\SDK\x64_vc180\Release(StaticCRT)\lib\AudioBusHackerFX.lib
+```
+
+SDK 包：
+
+```text
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz
+```
+
+`additional_artifacts.json` 为 `Windows_vc170` 和 `Windows_vc180` 分别声明 Factory 头映射。vc180 包内必须存在：
+
+```text
+SDK/include/AK/Plugin/AudioBusHackerFXFactory.h
+```
+
+`verify` 会检查 Debug/Profile/Release 产物、源码 Factory 头、SDK 包及包内 Factory 头。
+
+### 14.5 Wwise 2025.1.9 bundle
+
+当前 Wwise 2025.1.9 bundle 可同时包含：
+
+```text
+AudioBusHacker_v2025.1.9_Build9197_Authoring.Windows_x64.Debug.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_Authoring.Windows_x64.Release.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc170.tar.xz
+AudioBusHacker_v2025.1.9_Build9197_SDK.Windows_vc180.tar.xz
+```
+
+安装时按应用实际使用的工具链选择 `SDK Windows_vc170` 或 `SDK Windows_vc180`。同一应用只使用其中一套 SDK 产物；不要同时链接两个版本的 `AudioBusHackerFX.lib`。
+
+### 14.6 验证记录
+
+2026-09-08 已在未安装 MSVC `14.51.36231` 的机器上执行：
+
+```bat
+build_wwise_2025_1_9_vc180.bat all
+```
+
+Premake、Debug/Profile/Release 编译、StaticCRT、共享 DLL、SDK 打包及最终校验全部通过，最终输出：
+
+```text
+[SUCCESS] all completed.
 ```
