@@ -6,6 +6,15 @@ cd /d "%PROJECT_ROOT%"
 
 if not defined WWISEROOT set "WWISEROOT=H:\Audiokinetic\2025.1.9.9197"
 if not defined PLUGIN_VERSION set "PLUGIN_VERSION=2025.1.9.9197"
+
+rem Force the VS 2026 MSVC toolset used by Wwise vc180 builds.
+set "VSINSTALLDIR=C:\Program Files\Microsoft Visual Studio\18\Community\"
+set "VCINSTALLDIR=%VSINSTALLDIR%VC\"
+set "MSVC_ROOT=%VSINSTALLDIR%VC\Tools\MSVC\14.50.35717"
+set "VCToolsInstallDir=%MSVC_ROOT%\"
+set "VCToolsVersion=14.50.35717"
+set "VCVARS_USER_VERSION=14.50.35717"
+set "VSCMD_ARG_VCVARS_VER=14.50.35717"
 set "WP=%WWISEROOT%\Scripts\Build\Plugins\wp.py"
 
 set "ACTION=%~1"
@@ -103,6 +112,7 @@ echo ============================================================
 echo AudioBusHacker - Wwise 2025.1.9.9197 - vc180 / x64
 echo Project: %PROJECT_ROOT%
 echo Wwise:   %WWISEROOT%
+echo MSVC:    %MSVC_ROOT%
 echo Version: %PLUGIN_VERSION%
 echo Action:  %ACTION%
 echo ============================================================
@@ -116,6 +126,12 @@ if not exist "%WP%" (
 if not exist "%WWISEROOT%\SDK\include\AK\SoundEngine\Common\AkTypes.h" (
     echo [ERROR] Wwise SDK is incomplete. AkTypes.h was not found.
     set "FAILED_STEP=Environment check"
+    exit /b 1
+)
+
+if not exist "%MSVC_ROOT%\bin\Hostx64\x64\cl.exe" (
+    echo [ERROR] Required MSVC compiler was not found: %MSVC_ROOT%\bin\Hostx64\x64\cl.exe
+    set "FAILED_STEP=MSVC 14.50.35717 check"
     exit /b 1
 )
 
