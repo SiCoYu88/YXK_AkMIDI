@@ -417,6 +417,10 @@ enum class EAkCallbackType : uint8
 	Reserved = 16				UMETA(ToolTip = "Do not use."),
 #endif
 	
+#pragma region H3DWwise
+	EnableGetMusicPlayPosition	= 21 UMETA(Tooltip = "Enable play position info for AK::SoundEngine::GetMusicPlayPosition()."),
+#pragma endregion
+
 	Last						UMETA(Hidden)
 };
 
@@ -435,9 +439,12 @@ CHECK_CALLBACK_TYPE_VALUE(MusicSyncGrid);
 CHECK_CALLBACK_TYPE_VALUE(MusicSyncUserCue);
 CHECK_CALLBACK_TYPE_VALUE(MusicSyncPoint);
 CHECK_CALLBACK_TYPE_VALUE(MIDIEvent);
-#if WWISE_2024_1_OR_LATER
-static_assert(AK_Callback_Last == (1 << (uint32)EAkCallbackType::Last), "An AkCallbackType value was added to the enum, please update EAkCallbackType accordingly.");
-#endif
+#pragma region H3DWwise
+CHECK_CALLBACK_TYPE_VALUE(EnableGetMusicPlayPosition);
+#pragma endregion
+//#if WWISE_2024_1_OR_LATER
+//static_assert(AK_Callback_Last == (1 << (uint32)EAkCallbackType::Last), "An AkCallbackType value was added to the enum, please update EAkCallbackType accordingly.");
+//#endif
 
 static_assert(AK::SoundEngine::Query::RTPCValue_Default == 0, "AK::SoundEngine::Query::RTPCValue_Default is not equal to 0, please change the value in the ERTPCValueType enum");
 UENUM(BlueprintType)

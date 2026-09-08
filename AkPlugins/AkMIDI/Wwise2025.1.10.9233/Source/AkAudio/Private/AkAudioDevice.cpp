@@ -174,6 +174,25 @@ namespace FAkAudioDevice_Helpers
 		}
 	}
 
+#pragma region H3DWwise
+	void MidiCallback(AK::IAkGlobalPluginContext* Context, AkGlobalCallbackLocation Location)
+	{
+		SCOPED_AKAUDIO_EVENT_4(TEXT("FAkAudioDevice_Helpers::MidiCallback"));
+		(void)Context;
+		(void)Location;
+		FAkAudioDevice* Device = FAkAudioDevice::Get();
+		auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+		if (!Device || UNLIKELY(!SoundEngine))
+		{
+			return;
+		}
+
+		AkAudioSettings AudioSettings;
+		SoundEngine->GetAudioSettings(AudioSettings);
+		Device->OnMessageWaitToSend.ExecuteIfBound(&AudioSettings);
+	}
+#pragma endregion
+
 	void UnregisterGlobalCallbackDelegate(FAkAudioDeviceDelegates::FOnAkGlobalCallback* Delegate, FDelegateHandle Handle, AkGlobalCallbackLocation Location)
 	{
 		SCOPED_AKAUDIO_EVENT_4(TEXT("FAkAudioDevice_Helpers::UnregisterGlobalCallbackDelegate"));
@@ -543,6 +562,12 @@ bool FAkAudioDevice::Init()
 		UE_LOG(LogAkAudio, Log, TEXT("Audiokinetic Audio Device initialization failed."));
 		return false;
 	}
+
+#pragma region H3DWwise
+	RegisterGlobalCallback(
+		FAkAudioDeviceDelegates::FOnAkGlobalCallback::FDelegate::CreateStatic(&FAkAudioDevice_Helpers::MidiCallback),
+		AkGlobalCallbackLocation_PreProcessMessageQueueForRender);
+#pragma endregion
 
 #if !WITH_EDITOR
 	if (auto* akSettings = GetDefault<UAkSettings>())
@@ -4644,6 +4669,113 @@ AKRESULT FAkAudioDevice::RegisterPluginDLL(const FString& in_DllName, const FStr
 	delete[] szPath;
 	return eResult;
 }
+
+#pragma region H3DWwise
+#if WWISE_2025_1_OR_LATER
+void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkEventCallbackInfo* in_pEventInfo, void* in_pCallbackInfo, void* in_pCookie)
+{
+	SCOPED_AKAUDIO_EVENT_3(TEXT("FAkAudioDevice::MidiEndOfEventCallback"));
+	if (in_eType == AK_EndOfEvent && in_pEventInfo)
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("MIDI EndOfEvent received: EventID=%" PRIu32 ", PlayingID=%" PRIu32 ", GameObjectID=%" PRIu64),
+			in_pEventInfo->eventID, in_pEventInfo->playingID, in_pEventInfo->gameObjID);
+	}
+	if (in_eType == AK_EndOfEvent && in_pEventInfo)
+	{
+		if (auto* Device = FAkAudioDevice::Get())
+		{
+			Device->RemovePlayingID(in_pEventInfo->eventID, in_pEventInfo->playingID);
+		}
+	}
+}
+#else
+void FAkAudioDevice::MidiEndOfEventCallback(AkCallbackType in_eType, AkCallbackInfo* in_pCallbackInfo)
+{
+	SCOPED_AKAUDIO_EVENT_3(TEXT("FAkAudioDevice::MidiEndOfEventCallback"));
+	if (in_eType == AK_EndOfEvent && in_pCallbackInfo)
+	{
+		auto* EventInfo = static_cast<AkEventCallbackInfo*>(in_pCallbackInfo);
+		UE_LOG(LogAkAudio, Verbose, TEXT("MIDI EndOfEvent received: EventID=%" PRIu32 ", PlayingID=%" PRIu32 ", GameObjectID=%" PRIu64),
+			EventInfo->eventID, EventInfo->playingID, EventInfo->gameObjID);
+		if (auto* Device = FAkAudioDevice::Get())
+		{
+			Device->RemovePlayingID(EventInfo->eventID, EventInfo->playingID);
+		}
+	}
+}
+#endif
+
+AkPlayingID FAkAudioDevice::PostMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID,
+	AkMIDIPost* in_pPosts, AkUInt16 in_uNumPosts, AkPlayingID in_playingID,
+	AkUInt32 in_uFlags, AkCallbackFunc in_pfnCallback, void* in_pCookie, EAkAudioContext in_AudioContext)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::PostMidiEvent"));
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine)) return AK_NotInitialized;
+
+	const AkUniqueID EventID = in_Event ? in_Event->GetShortID() : AK_INVALID_UNIQUE_ID;
+	if (EventID == AK_INVALID_UNIQUE_ID)
+	{
+		return AK_InvalidParameter;
+	}
+
+	// 注册 AK_EndOfEvent 回调（MidiEndOfEventCallback，其签名严格匹配原生 AkCallbackFunc）。
+	// 目的：让引擎在 MIDI 播放实例自然结束时，自动把该 PlayingID 从 EventToPlayingIDMap 中移除，
+	// 从而使调用方可以通过 IsPlayingIDActive() 可靠判断某个 PlayingID 是否仍然有效，
+	// 避免复用已失效（僵尸）的 PlayingID 导致后续 Post 被 Wwise 丢弃而"没有声音"。
+	// Direct callers historically received the MIDI end callback automatically. UAkAudioEvent can
+	// now supply its regular callback package instead, so actor/component lifetime matches PostEvent.
+	if (in_uFlags != 0 && !in_pfnCallback)
+	{
+		in_pfnCallback = &FAkAudioDevice::MidiEndOfEventCallback;
+	}
+
+	const AkPlayingID PlayingID = SoundEngine->PostMIDIOnEvent(
+		EventID, in_gameObjectID, in_pPosts, in_uNumPosts,
+		false,
+		in_uFlags,
+		in_pfnCallback,
+		in_pCookie,
+		in_playingID);
+
+	if (PlayingID != AK_INVALID_PLAYING_ID)
+	{
+		// 登记进 EventToPlayingIDMap，配合上面的 EndOfEvent 回调形成"登记—失效移除"闭环。
+		// 复用已有实例（in_playingID 有效）时无需重复登记。
+		if (in_playingID == AK_INVALID_PLAYING_ID)
+		{
+			AddPlayingID(EventID, PlayingID, in_AudioContext);
+		}
+	}
+
+	return PlayingID;
+}
+
+AKRESULT FAkAudioDevice::StopMidiEvent(UAkAudioEvent* in_Event, AkGameObjectID in_gameObjectID, AkPlayingID in_playingID)
+{
+	SCOPED_AKAUDIO_EVENT(TEXT("FAkAudioDevice::StopMidiEvent"));
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine)) return AK_NotInitialized;
+
+	const AkUniqueID EventID = in_Event ? in_Event->GetShortID() : AK_INVALID_UNIQUE_ID;
+	if (EventID == AK_INVALID_UNIQUE_ID)
+	{
+		return AK_InvalidParameter;
+	}
+
+	// StopMIDIOnEvent only releases notes associated with the Event. It does not
+	// necessarily terminate the Event instance, so AK_EndOfEvent would never be
+	// emitted for looped MIDI Events. Stop the tracked instance explicitly after
+	// releasing its notes, which makes the regular callback package receive the
+	// same EndOfEvent notification as PostEvent.
+	const AKRESULT MidiResult = SoundEngine->StopMIDIOnEvent(EventID, in_gameObjectID, in_playingID);
+	if (in_playingID != AK_INVALID_PLAYING_ID)
+	{
+		StopPlayingID(in_playingID);
+	}
+	return MidiResult;
+}
+#pragma endregion
 // end
 
 FAkAudioDevice::SetCurrentAudioCultureAsyncTask::SetCurrentAudioCultureAsyncTask(FWwiseLanguageCookedData NewLanguage, FSetCurrentAudioCultureAction* LatentAction)

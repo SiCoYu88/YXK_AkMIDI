@@ -40,6 +40,10 @@ Copyright (c) 2026 Audiokinetic Inc.
 #include "Wwise/WwiseExternalSourceManager.h"
 #include "AkComponentHelpers.h"
 
+#pragma region H3DWwise
+#include "Kismet/KismetSystemLibrary.h"
+#pragma endregion
+
 #include "inttypes.h"
 #include "WwiseInitBankLoader/WwiseInitBankLoader.h"
 
@@ -130,8 +134,213 @@ int32 UAkGameplayStatics::PostEvent(UAkAudioEvent* AkEvent, AActor* Actor, int32
 		return AK_INVALID_PLAYING_ID;
 	}
 	
-	return AkEvent->PostOnActor(Actor, PostEventCallback, CallbackMask, bStopWhenAttachedToDestroyed);
+#pragma region H3DWwise
+	int32 PlayingID = -1;
+	PlayingID = AkEvent->PostOnActor(Actor, PostEventCallback, CallbackMask, bStopWhenAttachedToDestroyed);
+	LogWwiseInfo(TEXT("[WwiseDebug]-1 %ld PostEvent = %s, PlayingID = %d"), UKismetSystemLibrary::GetFrameCount(), *(AkEvent->GetName()), PlayingID);
+	return PlayingID;
+#pragma endregion
 }
+
+#pragma region H3DWwise
+int32 UAkGameplayStatics::PostEvent_WithFlush(UAkAudioEvent* AkEvent, bool bUseTransform)
+{
+	FOnAkPostEventCallback Callback;
+	int32 PlayingID = AK_INVALID_PLAYING_ID;
+	if (bUseTransform)
+	{
+		PlayingID = PostEvent(AkEvent, NULL, 0, Callback, false);
+	}
+	else
+	{
+		PlayingID = PostEventAtLocation(AkEvent, FVector::ZeroVector, FRotator::ZeroRotator, GWorld);
+	}
+
+	if (PlayingID > 0)
+	{
+		IWwiseSoundEngineAPI* SoundEngine = IWwiseSoundEngineAPI::Get();
+		SoundEngine->RenderAudio();
+
+		LogWwiseInfo(TEXT("[WwiseDebug]-2 %ld PostEvent = %s, PlayingID = %d"), UKismetSystemLibrary::GetFrameCount(), *(AkEvent->GetName()), PlayingID);
+
+		return PlayingID;
+	}
+	LogWwiseInfo(TEXT("[WwiseDebug]-3 %ld PostEvent = %s, PlayingID = %d"), UKismetSystemLibrary::GetFrameCount(), *(AkEvent->GetName()), PlayingID);
+	return -1;
+}
+
+int32 UAkGameplayStatics::GetSourcePlayPosition(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy /*= false*/)
+{
+	{
+		FString TraceName = FString::Printf(TEXT("[WwiseDebug]GetSourcePlayPosition"));
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR(*TraceName);
+		if (AkEvent) {
+			return bUseAkMusicHierarchy ? AkEvent->GetPlayingSegmentInfo(PlayingID):
+										 AkEvent->GetSourcePlayPosition(PlayingID);
+		}
+	}
+	return -1;
+}
+
+int32 UAkGameplayStatics::GetSourceActiveDuration(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy /*= false*/)
+{
+	{
+		FString TraceName = FString::Printf(TEXT("[WwiseDebug]GetSourceActiveDuration"));
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR(*TraceName);
+		if (AkEvent) {
+			return AkEvent->GetSourceActiveDuration(PlayingID);
+		}
+		return AK_INVALID_PLAYING_ID;
+	}
+}
+
+int32 UAkGameplayStatics::SeekOnEvent(UAkAudioEvent* AkEvent, class AActor* Actor, const int32 PlayingID, const float OffsetPercent)
+{
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	AKRESULT SeekRet = AK_Fail;
+	if (UNLIKELY(!SoundEngine))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("UAkGameplayStatics::AddOutput: SoundEngine not initialized, new output will not be added."));
+		return SeekRet;
+	}
+	if (IsValid(Actor))
+	{
+		FAkAudioDevice * AkAudioDevice = FAkAudioDevice::Get();
+		if (AkEvent)
+		{
+			AkUInt32 TempShortID = AkEvent->GetShortID();
+			SeekRet = AkAudioDevice->SeekOnEvent(TempShortID, Actor, OffsetPercent, false, PlayingID);
+#if WITH_EDITOR
+			LogWwiseInfo(TEXT("[WwiseDebug] %s SeekOnEvent %d, PlayingID = %d"), *(Actor->GetName()), (int32)SeekRet, PlayingID);
+#endif
+		}
+	}
+	else
+	{
+		AActor* DummyActor = nullptr;
+		FAkAudioDevice * AkAudioDevice = FAkAudioDevice::Get();
+		const AkUInt32 ShortID = AkAudioDevice->GetShortID(AkEvent,"");
+		// SeekRet = AkAudioDevice->SeekOnEvent(ShortID, DummyActor, OffsetPercent, false, PlayingID);
+		SeekRet = SoundEngine->SeekOnEvent(ShortID, DUMMY_GAMEOBJ, OffsetPercent, false, PlayingID);
+#if WITH_EDITOR
+		UE_LOG(LogAkAudio,Log,TEXT("[WwiseDebug] DummyActor SeekOnEvent %d, PlayingID = %d"), (int32)SeekRet, PlayingID);
+#endif
+	}
+	return SeekRet;
+}
+
+int32 UAkGameplayStatics::SeekOnEventWithMS(UAkAudioEvent* AkEvent, class AActor* Actor, const int32 PlayingID, const int32 OffsetMS)
+{
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	AKRESULT SeekRet = AK_Fail;
+	if (UNLIKELY(!SoundEngine))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("UAkGameplayStatics::AddOutput: SoundEngine not initialized, new output will not be added."));
+		return SeekRet;
+	}
+	if (IsValid(Actor))
+	{
+		FAkAudioDevice * AkAudioDevice = FAkAudioDevice::Get();
+		if (AkEvent)
+		{
+			bool bIsCreate = true;
+			AkUInt32 TempShortID = AkEvent->GetShortID();
+			UAkComponent* pComponent = UAkGameplayStatics::GetAkComponent(Actor->GetRootComponent(), bIsCreate);
+			if (pComponent)
+			{
+				AkGameObjectID ObjectID = pComponent->GetAkGameObjectID();
+				SeekRet = SoundEngine->SeekOnEvent(TempShortID, ObjectID, OffsetMS, false, PlayingID);
+			}
+		}
+	}
+	else
+	{
+		FAkAudioDevice * AkAudioDevice = FAkAudioDevice::Get();
+		const AkUInt32 ShortID = AkAudioDevice->GetShortID(AkEvent,"");
+		SeekRet = SoundEngine->SeekOnEvent(ShortID, DUMMY_GAMEOBJ, OffsetMS, false, PlayingID);
+	}
+#if WITH_EDITOR
+		LogWwiseInfo(TEXT("[WwiseDebug] SeekOnEvent %d, PlayingID = %d, OffsetMS = %d"), (int32)SeekRet, PlayingID, OffsetMS);
+#endif
+	return SeekRet;
+}
+
+int32 UAkGameplayStatics::PostEventWithSeek(class UAkAudioEvent* AkEvent, class AActor* Actor, int32 CallbackMask, const FOnAkPostEventCallback& PostEventCallback, bool bStopWhenAttachedToDestroyed /*= false*/, const int32 OffsetMS /*= 0*/)
+{
+	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("UAkGameplayStatics::AddOutput: SoundEngine not initialized, new output will not be added."));
+		return AK_INVALID_PLAYING_ID;
+	}
+	if (IsValid(AkEvent))
+	{
+		int32 PlayingID = UAkGameplayStatics::PostEvent(AkEvent, Actor, CallbackMask, PostEventCallback, bStopWhenAttachedToDestroyed);
+		if (PlayingID > 0)
+		{
+			AKRESULT SeekRet = AKRESULT::AK_Fail;
+			if (IsValid(Actor))
+			{
+				FAkAudioDevice* AkAudioDevice = FAkAudioDevice::Get();
+				if (AkEvent)
+				{
+					bool bIsCreate = true;
+					AkUInt32 TempShortID = AkEvent->GetShortID();
+					UAkComponent* pComponent = UAkGameplayStatics::GetAkComponent(Actor->GetRootComponent(), bIsCreate);
+					if (pComponent)
+					{
+						AkGameObjectID ObjectID = pComponent->GetAkGameObjectID();
+						SeekRet = SoundEngine->SeekOnEvent(TempShortID, ObjectID, OffsetMS, false, PlayingID);
+					}
+				}
+			}
+			else
+			{
+				FAkAudioDevice* AkAudioDevice = FAkAudioDevice::Get();
+				const AkUInt32 ShortID = AkAudioDevice->GetShortID(AkEvent, "");
+				SeekRet = SoundEngine->SeekOnEvent(ShortID, DUMMY_GAMEOBJ, OffsetMS, false, PlayingID);
+			}
+//#if WITH_EDITOR
+			LogWwiseInfo(TEXT("[WwiseDebug] [%ld] SeekOnEvent = %s, SeekRet = %d, PlayingID = %d, OffsetMS = %d, CallbackMask = %d"), UKismetSystemLibrary::GetFrameCount(), *(AkEvent->GetName()), (int32)(SeekRet), PlayingID, OffsetMS, CallbackMask);
+//#end
+			if (SeekRet == AKRESULT::AK_Success)
+			{
+				if (PlayingID > 0)
+				{
+					SoundEngine->RenderAudio();//PostEvent流程调用RenderAudio
+					LogWwiseInfo(TEXT("[WwiseDebug] RenderAudio PlayingID = %d"), PlayingID);
+				}
+				return PlayingID;
+			}
+		}
+	}
+	return AK_INVALID_PLAYING_ID;
+}
+
+int32 UAkGameplayStatics::PostEventAtLocationWithCallback(class UAkAudioEvent* AkEvent, UObject* WorldContextObject, FVector Location, FRotator Orientation, int32 CallbackMask, const FOnAkPostEventCallback& PostEventCallback, bool bStopWhenAttachedToDestroyed /*= false*/)
+{
+	if (LIKELY(IsValid(AkEvent)))
+	{
+		return AkEvent->PostAtLocation(Location, Orientation, PostEventCallback, CallbackMask, WorldContextObject);
+	}
+	return AK_INVALID_PLAYING_ID;
+}
+
+void UAkGameplayStatics::LogWwiseInfo(const TCHAR* InFormat, ...)
+{
+// #if WITH_EDITOR
+	TCHAR TempString[1024];
+	va_list Args;
+
+	va_start(Args, InFormat);
+	FCString::GetVarArgs(TempString, UE_ARRAY_COUNT(TempString), InFormat, Args);
+	va_end(Args);
+
+	UE_LOG(LogAkAudio, Log, TEXT("[AkAudio] %s"), TempString);
+// #endif
+}
+
+#pragma endregion
 
 int32 UAkGameplayStatics::PostAndWaitForEndOfEvent(UAkAudioEvent* AkEvent, AActor* Actor,
 	FLatentActionInfo LatentInfo, bool bStopWhenAttachedToDestroyed)
@@ -253,6 +462,11 @@ void UAkGameplayStatics::SetState(const UAkStateValue* StateValue)
 	{
 		if (StateValue)
 		{
+#pragma region H3DWwise
+#if WITH_EDITOR
+			LogWwiseInfo(TEXT("[WwiseDebug] FrameNum = %ld, SetState = %s"), UKismetSystemLibrary::GetFrameCount(), *(StateValue->GetName()));
+#endif
+#pragma endregion
 			AudioDevice->SetState(StateValue);
 		}
 	}
