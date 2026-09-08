@@ -1,0 +1,745 @@
+#pragma region H3D
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#include "AkMidiComponent.h"
+#include "AkAudioEvent.h"
+#include "Engine.h"
+
+void MyCallback(double DeltaTime, std::vector<unsigned char> *Message, void *UserData)
+{
+	UAkMidiComponent* MidiComponent = static_cast<UAkMidiComponent*>(UserData);
+
+	// 回调运行在 RtMidi 线程：仅做入队，不读取/修改任何 UObject 状态，
+	// 状态过滤（GetIsInputFromUnreal 等）统一放到游戏线程的 ProcessIncomingMidiQueue 中处理。
+	if (!MidiComponent || Message == nullptr || Message->empty())
+		return;
+
+	FRawMidiPacket Packet;
+	Packet.Data.SetNumUninitialized((int32)Message->size());
+	FMemory::Memcpy(Packet.Data.GetData(), Message->data(), Message->size());
+	Packet.DeltaTime = DeltaTime;
+	MidiComponent->IncomingMidiQueue.Enqueue(MoveTemp(Packet));
+}
+
+void HandleRtMidiCallback(UAkMidiMessage* AkMessage, UAkMidiComponent* MidiComponent, std::vector<unsigned char> RawMessage, double DeltaTime)
+{
+	if (!AkMessage || !MidiComponent)
+		return;
+
+	//External Midi Message Send To Wwise
+	if (MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
+	{
+		size_t nBytes = RawMessage.size();
+		uint8 RunningStatus = 0; // 记录上一个通道语音状态字节，用于支持 MIDI running status
+		for (size_t i = 0; i < nBytes;)
+		{
+			uint8 ID = RawMessage[i];
+
+			if (ID >= 0x80)
+			{
+				// 是状态字节，正常消费并更新 running status
+				++i;
+			}
+			else
+			{
+				// 是数据字节打头：MIDI running status，复用上一个状态字节，i 不前进
+				if (RunningStatus == 0)
+				{
+					// 无可复用的状态字节，无法解析，跳出避免死循环
+					break;
+				}
+				ID = RunningStatus;
+			}
+
+			uint8 Type = ID >> 4;
+			uint8 ChannelOrSubType = ID & 0x0F;
+
+			if (Type >= 0x8 && Type <= 0xE)
+			{
+				const bool bHasData02 = (Type != 0xC && Type != 0xD);
+				const size_t RequiredBytes = bHasData02 ? 2 : 1;
+				// i 已指向数据字节，校验剩余长度是否足够，避免越界读取
+				if (i + RequiredBytes > nBytes)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[MIDI] Truncated message, expected %llu data byte(s)"), (uint64)RequiredBytes);
+					break;
+				}
+
+				RunningStatus = ID; // 通道语音消息可作为后续 running status
+
+				AkMessage->NoteType = (EAkMessageType)(Type & 0x0F);
+				AkMessage->Channel = ChannelOrSubType;
+				AkMessage->Data01 = RawMessage[i++] & 0xFF;
+
+				if (bHasData02)
+				{
+					AkMessage->Data02 = RawMessage[i++] & 0xFF;
+				}
+			}
+			//Wwise Not Support SysEx & Midi Clock Event Now
+			/*else if (Type == 0xF)
+			{
+				//SysEx Message Start
+				if (ChannelOrSubType == 0)
+				{
+					MidiComponent->StartSysEx();
+					continue;
+				}
+				//SysEx Message End
+				else if (ChannelOrSubType == 7)
+				{
+					MidiComponent->StopSysEx();
+					continue;
+				}
+			}*/
+			else
+			{
+				// System 消息（0xF）等会清除 running status；未支持的类型直接跳出避免死循环
+				RunningStatus = 0;
+				break;
+			}
+		}
+	}
+	//External Midi Message Send To Other Midi Receiver
+	else if (!MidiComponent->GetIsOutputToWwise() && !MidiComponent->GetIsInputFromUnreal())
+	{
+		MidiComponent->SendRawMidiMessage(RawMessage);
+	}
+
+
+	if (MidiComponent->bMidiFxOnOff)
+	{
+		MidiComponent->InsertMidiFx(AkMessage);
+	}
+
+	MidiComponent->MakePost(AkMessage);
+
+
+
+	if (MidiComponent->OnMessageReceived.IsBound())
+	{
+		MidiComponent->OnMessageReceived.Broadcast(AkMessage, (float)DeltaTime);
+
+	}
+
+	return;
+}
+
+
+
+void UAkMidiComponent::OnRegister()
+{
+
+	if (!AkAudioDevice)
+		AkAudioDevice = FAkAudioDevice::Get();
+
+	Super::OnRegister();
+
+	if (AkAudioDevice)
+		AkAudioDevice->RegisterComponent(this);
+
+	return;
+}
+
+void UAkMidiComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// 在游戏线程消费外部 MIDI 数据：解析、填充 Posts、广播蓝图委托、RtMidi 发送。
+	// 只有当音频线程置位后才处理，避免每帧空转。
+	if (bHasPendingMidi)
+	{
+		bHasPendingMidi = false;
+
+		ProcessIncomingMidiQueue();
+
+		// 将已准备好的 Posts 提交给 Wwise（PostMidiEvent 为线程安全的入队 API，可在游戏线程调用）
+		if (GetIsOutputToWwise())
+		{
+			PostMidiEvent();
+		}
+	}
+}
+
+void UAkMidiComponent::BeginDestroy()
+{
+	// 在对象进入销毁流程时，尽早取消 RtMidi 回调，杜绝回调线程访问已失效对象
+	if (MidiDevice && bInputCallbackRegistered)
+	{
+		if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+		{
+			MidiIn->cancelCallback();
+		}
+		bInputCallbackRegistered = false;
+	}
+
+	// 停止仍在播放的 MIDI 实例（按记录的 PlayingID 精确停止），避免循环音色在组件销毁后残留。
+	// 引擎可能正在卸载：用 FAkAudioDevice::Get() 重新获取单例并判空，不用可能已失效的成员指针。
+	if (FAkAudioDevice* AudioDevice = FAkAudioDevice::Get())
+	{
+		const AkGameObjectID GameObjectID = GetAkGameObjectID();
+		for (auto& Pair : ActivePlayingIDs)
+		{
+			// Event 可能因资产卸载而失效，ResolveObjectPtr() 返回 nullptr 时跳过，避免对悬空 Event 调用
+			if (UAkAudioEvent* Event = Pair.Key.ResolveObjectPtr())
+			{
+				AudioDevice->StopMidiEvent(Event, GameObjectID, Pair.Value);
+			}
+		}
+		ActivePlayingIDs.Empty();
+	}
+
+	Super::BeginDestroy();
+}
+
+bool UAkMidiComponent::GetIsOutputToWwise() const
+{
+	FScopeLock Lock(&StateCS);
+	return OutputTarget == EMidiOutputTarget::Wwise;
+}
+
+bool UAkMidiComponent::GetIsInputFromUnreal() const
+{
+	FScopeLock Lock(&StateCS);
+	return InputSource == EMidiInputSource::Unreal;
+}
+
+
+
+void UAkMidiComponent::HandleWwiseCallback(AkAudioSettings* in_AudioSettings)
+{
+	// 该回调运行在 Wwise 音频渲染线程：不得在此操作 UObject / 广播蓝图委托 / 调用 RtMidi。
+	// 这里仅置位标记，真正的消费在游戏线程 TickComponent 中进行。
+	// 注意：in_AudioSettings 指向音频线程栈上的临时对象，跨线程保存其裸指针会悬空，故不缓存。
+	(void)in_AudioSettings;
+	bHasPendingMidi = true;
+}
+
+
+UAkMidiComponent::UAkMidiComponent(const class FObjectInitializer &ObjectInitializer) : Super(ObjectInitializer),
+OutputTarget(EMidiOutputTarget::Wwise), InputSource(EMidiInputSource::Unreal), bMidiFxOnOff(false), MessagePoolCount(0), PostPoolCount(0)
+{
+	// 启用 Tick：外部 MIDI 数据的消费（广播/蓝图/RtMidi 发送）统一放到游戏线程执行，
+	// 避免在 Wwise 音频渲染线程上操作 UObject 与蓝图委托。
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = true;
+
+	MidiDevice = NewObject<UAkMidiDevice>();
+	MidiDevice->AddToRoot();
+
+	AkAudioDevice = FAkAudioDevice::Get();
+
+	for (int i = 0; i < MessagePoolMax; i++)
+	{ 
+		UAkMidiMessage* Message = NewObject<UAkMidiMessage>();
+		Message->AddToRoot();
+		MessagePool.Add(Message);
+
+		AkMIDIPost* Post = new AkMIDIPost();
+		PostPool.Add(Post);
+	}
+}
+
+UAkMidiComponent::~UAkMidiComponent()
+{
+	// 先取消 RtMidi 输入回调并关闭端口，确保回调线程不再触碰本对象（避免 use-after-free）
+	if (MidiDevice)
+	{
+		if (bInputCallbackRegistered)
+		{
+			if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+			{
+				MidiIn->cancelCallback();
+			}
+			bInputCallbackRegistered = false;
+		}
+	}
+
+	CloseMidiDevice(EIOType::IO_Both);
+
+	for (auto Message : MessagePool)
+	{
+		if (!Message)
+			continue;
+		if (!Message->IsValidLowLevel())
+			continue;
+
+		// 移除 root 引用后再销毁，避免 GC 泄漏
+		Message->RemoveFromRoot();
+		Message->ConditionalBeginDestroy();
+	}
+	MessagePool.Empty();
+
+	// 释放 MidiDevice（其析构会 delete 内部 RtMidiIn/RtMidiOut）
+	if (MidiDevice && MidiDevice->IsValidLowLevel())
+	{
+		MidiDevice->RemoveFromRoot();
+		MidiDevice->ConditionalBeginDestroy();
+	}
+	MidiDevice = nullptr;
+
+	for (auto Post : PostPool)
+	{
+		if (Post != nullptr)
+		{
+			delete Post;
+			Post = nullptr;
+		}
+	}
+	PostPool.Empty();
+
+	Posts.Empty();
+}
+
+
+bool UAkMidiComponent::PostMidiEvent()
+{
+	if (AkAudioEvent == nullptr || Posts.Num() <= 0)
+	{
+		// 事件为空或无待提交数据时，同样清空 Posts，避免其无上限累积
+		Posts.Empty();
+		return false;
+	}
+	
+	// 目标 PlayingID 的选取按"本批是否包含 Note-On"分流（详见带参重载注释）：
+	//   - 含 Note-On：每次新建实例，保证每次 Note-On 都重新起音；新 PlayingID 覆盖缓存供 Note-Off 停止 Loop。
+	//   - 不含 Note-On：复用缓存中仍存活的 PlayingID，使 Note-Off 能停止对应 Loop 实例。
+	const TObjectKey<UAkAudioEvent> EventKey(AkAudioEvent.Get());
+	const bool bBatchHasNoteOn = PostsContainNoteOn();
+
+	AkPlayingID TargetPlayingID;
+	if (bBatchHasNoteOn)
+	{
+		TargetPlayingID = AK_INVALID_PLAYING_ID;
+	}
+	else
+	{
+		TargetPlayingID = ResolveActivePlayingID(EventKey, AkAudioEvent.Get());
+		// 无存活实例且本批全是 Note-Off：目标实例已不存在，直接丢弃，避免新建孤儿实例。
+		if (TargetPlayingID == AK_INVALID_PLAYING_ID)
+		{
+			Posts.Empty();
+			return false;
+		}
+	}
+
+	AkPlayingID PlayingID = AkAudioEvent->PostMIDIOnGameObject(
+		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID);
+
+	Posts.Empty();
+
+	if (PlayingID > 0)
+	{
+		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
+		ActivePlayingIDs.Add(EventKey, PlayingID);
+		PurgeStalePlayingIDs();
+		return true;
+	}
+	else
+	{
+		// Post 失败，清掉记录，下次重新创建实例
+		ActivePlayingIDs.Remove(EventKey);
+		return false;
+	}
+}
+
+
+int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent)
+{
+	if ((InputSource != EMidiInputSource::Unreal))
+		return AK_INVALID_PLAYING_ID;
+
+	if (AkMidiMessages.Num() <= 0)
+		return AK_INVALID_PLAYING_ID;
+
+	//Ak Midi Message Send To Wwise
+	if (GetIsOutputToWwise())
+	{
+		for (auto MidiMessage : AkMidiMessages)
+		{
+			if (!bMidiFxOnOff)
+			{
+				MakePost(MidiMessage);
+			}
+			else if (bMidiFxOnOff && (InputSource == EMidiInputSource::Unreal))
+			{
+				//UAkMidiMessage* AkMessageFxProcessed = NewObject<UAkMidiMessage>(this, TEXT("AkMessageFxProcessed"), EObjectFlags::RF_NoFlags, MidiMessage);
+				MidiMessage->BackupMidiMessage();
+				InsertMidiFx(MidiMessage);
+				MakePost(MidiMessage);
+				MidiMessage->RecoverMidiMessage();
+			}
+			else if (bMidiFxOnOff && (InputSource != EMidiInputSource::Unreal))
+			{
+				InsertMidiFx(MidiMessage);
+				MakePost(MidiMessage);
+			}
+		}
+	}
+	//Ak Midi Message Send To Other Midi Receiver
+	else
+	{
+		for (auto MidiMessage : AkMidiMessages)
+		{
+			if (bMidiFxOnOff)
+			{
+				MidiMessage->BackupMidiMessage();
+				InsertMidiFx(MidiMessage);
+			}
+
+			uint8 Status = ((uint8)MidiMessage->NoteType << 4) | MidiMessage->Channel;
+			uint8 RawMessage[3] = { Status,(uint8)MidiMessage->Data01, (uint8)MidiMessage->Data02 };
+
+			RtMidiOut* MidiOut = MidiDevice ? MidiDevice->GetRtMidiOut() : nullptr;
+			if (MidiOut)
+			{
+				if (MidiMessage->NoteType != EAkMessageType::AMT_Program_Change && MidiMessage->NoteType != EAkMessageType::AMT_Channel_AfterTouch)
+				{
+					MidiOut->sendMessage(&RawMessage[0], 3);
+				}
+				else
+				{
+					MidiOut->sendMessage(&RawMessage[0], 2);
+				}
+			}
+
+			MidiMessage->RecoverMidiMessage();
+		}
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	// 统一目标 Event：优先入参，空则回落组件自身 AkAudioEvent。
+	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent.Get();
+	if (TargetEvent == nullptr)
+	{
+		Posts.Empty();
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	// 目标 PlayingID 的选取按"本批是否包含 Note-On"分流：
+	//   - 含 Note-On：每次都用 AK_INVALID_PLAYING_ID 让 Wwise 新建实例，保证"每次 Note-On 都能重新起音"
+	//     （打击音/单音重复触发）。返回的新 PlayingID 会覆盖缓存，供后续 Note-Off 停止 Loop 使用。
+	//   - 不含 Note-On（纯 Note-Off / CC 等）：复用缓存中最近的、仍存活的 PlayingID，
+	//     使 Note-Off 能路由到对应实例，正确停止 Loop 音色。
+	const TObjectKey<UAkAudioEvent> EventKey(TargetEvent);
+	const bool bBatchHasNoteOn = PostsContainNoteOn();
+
+	AkPlayingID TargetPlayingID;
+	if (bBatchHasNoteOn)
+	{
+		TargetPlayingID = AK_INVALID_PLAYING_ID;
+	}
+	else
+	{
+		TargetPlayingID = ResolveActivePlayingID(EventKey, TargetEvent);
+		// 无存活实例且本批全是 Note-Off：目标实例已不存在，发 Note-Off 无意义，
+		// 直接丢弃本批，避免让 Wwise 新建一个无法被匹配的孤儿实例。
+		if (TargetPlayingID == AK_INVALID_PLAYING_ID)
+		{
+			Posts.Empty();
+			return TargetPlayingID;
+		}
+	}
+
+	AkPlayingID PlayingID = TargetEvent->PostMIDIOnGameObject(
+		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID);
+
+	for (auto& Post : Posts) 
+	{
+		UE_LOG(LogTemp,Verbose,TEXT("[MIDI] byType = %d, noteNum = %d"), Post.midiEvent.byType, Post.midiEvent.NoteOnOff.byNote);
+	}
+	Posts.Empty();
+
+	if (PlayingID > 0)
+	{
+		// 保存本次返回的 PlayingID（实例若已结束，Wwise 会新建并返回新 ID，这里始终以最新为准）
+		ActivePlayingIDs.Add(EventKey, PlayingID);
+		PurgeStalePlayingIDs();
+		return PlayingID;
+	}
+	else
+	{
+		// Post 失败，清掉记录，下次重新创建实例
+		ActivePlayingIDs.Remove(EventKey);
+		return AK_INVALID_PLAYING_ID;
+	}
+}
+
+bool UAkMidiComponent::StopMidiEvent(UAkAudioEvent *AkEvent)
+{
+	if (!AkAudioDevice || !AkAudioDevice->IsInitialized())
+	{
+		return false;
+	}
+
+	AkGameObjectID GameObjectID = GetAkGameObjectID();
+
+	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
+	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent.Get();
+	if (TargetEvent == nullptr)
+		return false;
+
+	AKRESULT Res = AK_Fail;
+
+	// 用保存的 PlayingID 精确定位要停止的播放实例；无记录时退化为不传（停止该事件/对象的全部实例）
+	const TObjectKey<UAkAudioEvent> EventKey(TargetEvent);
+	AkPlayingID* ActiveID = ActivePlayingIDs.Find(EventKey);
+	AkPlayingID TargetPlayingID = ActiveID ? *ActiveID : AK_INVALID_PLAYING_ID;
+
+	Res = AkAudioDevice->StopMidiEvent(TargetEvent, GameObjectID, TargetPlayingID);
+
+	// 无论停止结果如何都清空记录：实例已停止（或本就不存在），下一次播放应重新创建实例
+	ActivePlayingIDs.Remove(EventKey);
+
+	if (Res == AK_Success)
+		return true;
+	else
+		return false;
+}
+
+UAkMidiMessage* UAkMidiComponent::InsertMidiFx_Implementation(UAkMidiMessage* MidiMessage)
+{
+	return MidiMessage;
+}
+
+void UAkMidiComponent::MidiFxBypass(bool bIsMidiFxBypass)
+{
+	FScopeLock Lock(&StateCS);
+	bMidiFxOnOff = !bIsMidiFxBypass;
+}
+
+
+void UAkMidiComponent::MakePost(UAkMidiMessage *MIDINote)
+{
+	if (MIDINote == nullptr)
+		return;
+
+	// 用取模保证索引恒在 [0, PostPool.Num()) 范围内，避免 uint8 溢出与不必要的容量浪费
+	if (PostPool.Num() == 0)
+		return;
+	PostPoolCount = PostPoolCount % PostPool.Num();
+
+	AkMIDIPost *Post = PostPool[PostPoolCount++];
+
+	if (MIDINote->ToAkMIDIPost(*Post))
+	{
+		Posts.Add(*Post);
+	}
+
+	return;
+}
+
+AkPlayingID UAkMidiComponent::ResolveActivePlayingID(const TObjectKey<UAkAudioEvent>& EventKey, UAkAudioEvent* Event)
+{
+	// 取出上次缓存的 PlayingID；无缓存则直接用 AK_INVALID_PLAYING_ID（让 Wwise 新建实例）。
+	AkPlayingID* CachedID = ActivePlayingIDs.Find(EventKey);
+	if (CachedID == nullptr)
+	{
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	// 关键修复：缓存的 PlayingID 可能对应一个"已自然结束"的 MIDI 播放实例（僵尸 ID）。
+	// 直接把僵尸 ID 传给 PostMIDIOnEvent，Wwise 会因找不到活动实例而丢弃本批消息，
+	// 表现为"第一次有声、之后相同参数都没声音"。
+	// 引擎侧已在 FAkAudioDevice::PostMidiEvent 注册 AK_EndOfEvent 回调：实例结束时会自动
+	// 从 EventToPlayingIDMap 移除该 ID，因此这里用 IsPlayingIDActive 即可可靠判断其是否仍然有效。
+	const AkUniqueID EventID = Event ? Event->GetShortID() : AK_INVALID_UNIQUE_ID;
+	if (AkAudioDevice && EventID != AK_INVALID_UNIQUE_ID &&
+		AkAudioDevice->IsPlayingIDActive(EventID, *CachedID))
+	{
+		// 实例仍存活：复用，保证 Note-On/Note-Off 路由到同一实例。
+		return *CachedID;
+	}
+
+	// 实例已结束（或无法校验）：丢弃失效缓存，回退到新建实例。
+	ActivePlayingIDs.Remove(EventKey);
+	return AK_INVALID_PLAYING_ID;
+}
+
+bool UAkMidiComponent::PostsContainNoteOn() const
+{
+	for (const AkMIDIPost& Post : Posts)
+	{
+		// 速度为 0 的 Note-On 按 MIDI 惯例等价于 Note-Off，不视为真正的起音
+		if (Post.midiEvent.byType == AK_MIDI_EVENT_TYPE_NOTE_ON && Post.midiEvent.NoteOnOff.byVelocity > 0)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UAkMidiComponent::PurgeStalePlayingIDs()
+{
+	// 移除 Event 已失效（被 GC/卸载）的记录；此类记录的 PlayingID 已无意义。
+	for (auto It = ActivePlayingIDs.CreateIterator(); It; ++It)
+	{
+		if (It.Key().ResolveObjectPtr() == nullptr)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+void UAkMidiComponent::GetMidiDevice(TArray<FMidiDevice>& InputDevices, TArray<FMidiDevice>& OutputDevices)
+{
+	if (!MidiDevice)
+		return;
+
+	AkAudioDevice->OnMessageWaitToSend.BindUObject(this, &UAkMidiComponent::HandleWwiseCallback);
+
+	InputDevices.Empty();
+	OutputDevices.Empty();
+
+	InputDevices.Insert(DefaultInputDevice, 0);
+	OutputDevices.Insert(DefaultOutputDevice, 0);
+
+	MidiDevice->GetMidiDevice(InputDevices, OutputDevices);
+
+	if (RtMidiIn* MidiIn = MidiDevice->GetRtMidiIn())
+	{
+		MidiIn->setCallback(MyCallback, this);
+		bInputCallbackRegistered = true;
+	}
+
+
+	return;
+}
+
+void UAkMidiComponent::OpenMidiInputDevice(uint8 InputPort)
+{
+	if (!MidiDevice)
+		return;
+	
+	if (InputPort == 127)
+	{
+		FScopeLock Lock(&StateCS);
+		InputSource = EMidiInputSource::Unreal;
+	}
+	else
+	{
+		{
+			FScopeLock Lock(&StateCS);
+			InputSource = EMidiInputSource::ExternalDevice;
+		}
+		MidiDevice->OpenInput(InputPort);
+
+	}
+
+	return;
+}
+
+void UAkMidiComponent::OpenMidiOutputDevice(uint8 OutputPort)
+{
+	if (!MidiDevice)
+		return;
+
+	if (OutputPort == 127)
+	{
+		FScopeLock Lock(&StateCS);
+		OutputTarget = EMidiOutputTarget::Wwise;
+	}
+	else
+	{
+		{
+			FScopeLock Lock(&StateCS);
+			OutputTarget = EMidiOutputTarget::ExternalDevice;
+		}
+		MidiDevice->OpenOutput(OutputPort);
+	}
+
+	return;
+}
+
+void UAkMidiComponent::CloseMidiDevice(EIOType ClosePort)
+{
+	if (!MidiDevice)
+		return;
+
+	// 先在锁内读取快照，再在锁外执行设备 IO，最后在锁内写回状态，避免长时间持锁
+	EMidiInputSource InputSnapshot;
+	EMidiOutputTarget OutputSnapshot;
+	{
+		FScopeLock Lock(&StateCS);
+		InputSnapshot = InputSource;
+		OutputSnapshot = OutputTarget;
+	}
+
+	if (ClosePort == EIOType::IO_Both)
+	{
+		if (InputSnapshot == EMidiInputSource::ExternalDevice)
+		{
+			MidiDevice->CloseInput();
+		}
+		if (OutputSnapshot == EMidiOutputTarget::ExternalDevice)
+		{
+			MidiDevice->CloseOutput();
+		}
+		FScopeLock Lock(&StateCS);
+		InputSource = EMidiInputSource::None;
+		OutputTarget = EMidiOutputTarget::None;
+	}
+	else if (ClosePort == EIOType::IO_Input)
+	{
+		if (InputSnapshot == EMidiInputSource::ExternalDevice)
+		{
+			MidiDevice->CloseInput();
+		}
+		FScopeLock Lock(&StateCS);
+		InputSource = EMidiInputSource::None;
+	}
+	else if (ClosePort == EIOType::IO_Output)
+	{
+		if (OutputSnapshot == EMidiOutputTarget::ExternalDevice)
+		{
+			MidiDevice->CloseOutput();
+		}
+		FScopeLock Lock(&StateCS);
+		OutputTarget = EMidiOutputTarget::None;
+	}
+
+	return;
+
+}
+
+void UAkMidiComponent::SendRawMidiMessage(std::vector<unsigned char>& RawMessage)
+{
+	if (!MidiDevice || RawMessage.empty())
+		return;
+
+	RtMidiOut* MidiOut = MidiDevice->GetRtMidiOut();
+	if (!MidiOut)
+		return;
+
+	MidiOut->sendMessage(RawMessage.data(), RawMessage.size());
+
+	return;
+}
+
+
+
+void UAkMidiComponent::ProcessIncomingMidiQueue()
+{
+	FRawMidiPacket Packet;
+	while (IncomingMidiQueue.Dequeue(Packet))
+	{
+		// 状态过滤统一在游戏线程处理（原先位于 RtMidi 回调线程的 MyCallback 中）
+		if (GetIsInputFromUnreal())
+			continue;
+
+		std::vector<unsigned char> RawMessage(Packet.Data.GetData(), Packet.Data.GetData() + Packet.Data.Num());
+		if (MessagePool.Num() == 0)
+			continue;
+		MessagePoolCount = MessagePoolCount % MessagePool.Num();
+		UAkMidiMessage* AkMessage = MessagePool[MessagePoolCount++];
+		HandleRtMidiCallback(AkMessage, this, RawMessage, Packet.DeltaTime);
+	}
+}
+
+// 已移除：MakePostsAsync::DoWork 与 HandleRtMidiCallback 逻辑完全重复，且从未被实例化调用。
+// 该类会在工作线程中直接操作 UObject / 广播动态委托，存在线程安全隐患。
+
+
+
+#pragma endregion
