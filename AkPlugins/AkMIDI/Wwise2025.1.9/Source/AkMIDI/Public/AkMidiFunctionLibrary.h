@@ -32,6 +32,23 @@ public:
 		TArray<UAkMidiMessage*> AkMidiMessages, 
 		UAkAudioEvent *AkEvent = nullptr);
 
+	/**
+	 * Posts MIDI messages on an AkAudioEvent attached to an Actor, following the same Actor/GameObject
+	 * setup and callback lifecycle as UAkGameplayStatics::PostEvent.
+	 * Reuse the returned PlayingID when posting subsequent messages for the same MIDI instance.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|Actor",
+		meta = (AdvancedDisplay = "3", AutoCreateRefTerm = "PostEventCallback",
+			CPP_Default_PlayingID = "0", CPP_Default_CallbackMask = "1"))
+	static int32 PostMidiEventOnActor(
+		UAkAudioEvent* AkEvent,
+		AActor* Actor,
+		TArray<UAkMidiMessage*> AkMidiMessages,
+		int32 PlayingID,
+		UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/AkAudio.EAkCallbackType")) int32 CallbackMask,
+		const FOnAkPostEventCallback& PostEventCallback,
+		bool bStopWhenAttachedToDestroyed = true);
+
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|Function")
 	static bool StopMidiEvent(
 		UAkMidiComponent* MidiComponent,

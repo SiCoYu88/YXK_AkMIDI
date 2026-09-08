@@ -69,4 +69,52 @@ void UAkMidiMessage::RecoverMidiMessage()
 	return;
 }
 
+bool UAkMidiMessage::ToAkMIDIPost(AkMIDIPost& OutPost) const
+{
+	OutPost = AkMIDIPost{};
+	OutPost.midiEvent.byChan = Channel;
+	OutPost.uOffset = NoteOffset;
+
+	switch (NoteType)
+	{
+	case EAkMessageType::AMT_Note_On:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_ON;
+		OutPost.midiEvent.NoteOnOff.byNote = Data01;
+		OutPost.midiEvent.NoteOnOff.byVelocity = Data02;
+		break;
+	case EAkMessageType::AMT_Note_Off:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_OFF;
+		OutPost.midiEvent.NoteOnOff.byNote = Data01;
+		OutPost.midiEvent.NoteOnOff.byVelocity = Data02;
+		break;
+	case EAkMessageType::AMT_AfterTouch:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_AFTERTOUCH;
+		OutPost.midiEvent.NoteAftertouch.byNote = Data01;
+		OutPost.midiEvent.NoteAftertouch.byValue = Data02;
+		break;
+	case EAkMessageType::AMT_CC:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_CONTROLLER;
+		OutPost.midiEvent.Cc.byCc = Data01;
+		OutPost.midiEvent.Cc.byValue = Data02;
+		break;
+	case EAkMessageType::AMT_Program_Change:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_PROGRAM_CHANGE;
+		OutPost.midiEvent.ProgramChange.byProgramNum = Data01;
+		break;
+	case EAkMessageType::AMT_Channel_AfterTouch:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_CHANNEL_AFTERTOUCH;
+		OutPost.midiEvent.ChanAftertouch.byValue = Data01;
+		break;
+	case EAkMessageType::AMT_Pitch_Bend:
+		OutPost.midiEvent.byType = AK_MIDI_EVENT_TYPE_PITCH_BEND;
+		OutPost.midiEvent.PitchBend.byValueLsb = Data01;
+		OutPost.midiEvent.PitchBend.byValueMsb = Data02;
+		break;
+	default:
+		return false;
+	}
+
+	return true;
+}
+
 #pragma endregion

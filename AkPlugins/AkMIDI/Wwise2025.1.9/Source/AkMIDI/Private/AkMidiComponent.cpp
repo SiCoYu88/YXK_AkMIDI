@@ -301,8 +301,6 @@ bool UAkMidiComponent::PostMidiEvent()
 		return false;
 	}
 	
-	AkGameObjectID GameObjectID = GetAkGameObjectID();
-
 	// 目标 PlayingID 的选取按"本批是否包含 Note-On"分流（详见带参重载注释）：
 	//   - 含 Note-On：每次新建实例，保证每次 Note-On 都重新起音；新 PlayingID 覆盖缓存供 Note-Off 停止 Loop。
 	//   - 不含 Note-On：复用缓存中仍存活的 PlayingID，使 Note-Off 能停止对应 Loop 实例。
@@ -325,7 +323,8 @@ bool UAkMidiComponent::PostMidiEvent()
 		}
 	}
 
-	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(AkAudioEvent, GameObjectID, Posts.GetData(), Posts.Num(), TargetPlayingID);
+	AkPlayingID PlayingID = AkAudioEvent->PostMIDIOnGameObject(
+		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID);
 
 	Posts.Empty();
 
@@ -409,8 +408,6 @@ int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UA
 		return AK_INVALID_PLAYING_ID;
 	}
 
-	AkGameObjectID GameObjectID = GetAkGameObjectID();
-
 	// 统一目标 Event：优先入参，空则回落组件自身 AkAudioEvent。
 	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
 	UAkAudioEvent* TargetEvent = AkEvent ? AkEvent : AkAudioEvent.Get();
@@ -445,7 +442,8 @@ int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UA
 		}
 	}
 
-	AkPlayingID PlayingID = AkAudioDevice->PostMidiEvent(TargetEvent, GameObjectID, Posts.GetData(), Posts.Num(), TargetPlayingID);
+	AkPlayingID PlayingID = TargetEvent->PostMIDIOnGameObject(
+		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID);
 
 	for (auto& Post : Posts) 
 	{
@@ -470,6 +468,11 @@ int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UA
 
 bool UAkMidiComponent::StopMidiEvent(UAkAudioEvent *AkEvent)
 {
+	if (!AkAudioDevice || !AkAudioDevice->IsInitialized())
+	{
+		return false;
+	}
+
 	AkGameObjectID GameObjectID = GetAkGameObjectID();
 
 	// AkAudioEvent 为 TObjectPtr，显式 .Get() 取裸指针，避免三元表达式两分支类型不一致导致的歧义。
@@ -519,51 +522,10 @@ void UAkMidiComponent::MakePost(UAkMidiMessage *MIDINote)
 
 	AkMIDIPost *Post = PostPool[PostPoolCount++];
 
-	Post->midiEvent.byChan = MIDINote->Channel;
-	Post->uOffset = MIDINote->NoteOffset;
-
-	switch (MIDINote->NoteType)
+	if (MIDINote->ToAkMIDIPost(*Post))
 	{
-	case EAkMessageType::AMT_Note_On:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_ON;
-		Post->midiEvent.NoteOnOff.byNote = MIDINote->Data01;
-		Post->midiEvent.NoteOnOff.byVelocity = MIDINote->Data02;
-		break;
-	case EAkMessageType::AMT_Note_Off:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_OFF;
-		Post->midiEvent.NoteOnOff.byNote = MIDINote->Data01;
-		Post->midiEvent.NoteOnOff.byVelocity = MIDINote->Data02;
-		/*Post->uOffset = MIDINote->NoteOffset + AudioSettings->uNumSamplesPerFrame / 2;*/
-		break;
-	case EAkMessageType::AMT_AfterTouch:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_NOTE_AFTERTOUCH;
-		Post->midiEvent.NoteAftertouch.byNote = MIDINote->Data01;
-		Post->midiEvent.NoteAftertouch.byValue = MIDINote->Data02;
-		break;
-	case EAkMessageType::AMT_CC:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_CONTROLLER;
-		Post->midiEvent.Cc.byCc = MIDINote->Data01;
-		Post->midiEvent.Cc.byValue = MIDINote->Data02;
-		break;
-	case EAkMessageType::AMT_Program_Change:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_PROGRAM_CHANGE;
-		Post->midiEvent.ProgramChange.byProgramNum = MIDINote->Data01;
-		break;
-	case EAkMessageType::AMT_Channel_AfterTouch:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_CHANNEL_AFTERTOUCH;
-		Post->midiEvent.ChanAftertouch.byValue = MIDINote->Data01;
-		break;
-	case EAkMessageType::AMT_Pitch_Bend:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_PITCH_BEND;
-		Post->midiEvent.PitchBend.byValueLsb = MIDINote->Data01;
-		Post->midiEvent.PitchBend.byValueMsb = MIDINote->Data02;
-		break;
-	default:
-		Post->midiEvent.byType = AK_MIDI_EVENT_TYPE_INVALID;
-		break;
+		Posts.Add(*Post);
 	}
-
-	Posts.Add(*Post);
 
 	return;
 }

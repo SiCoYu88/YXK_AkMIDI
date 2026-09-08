@@ -139,6 +139,9 @@ public:
 
 	void RecoverMidiMessage();
 
+	/** Converts this Blueprint message to the structure consumed by Wwise PostMIDIOnEvent. */
+	bool ToAkMIDIPost(AkMIDIPost& OutPost) const;
+
 protected:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent &PropertyChangedEvent) override;

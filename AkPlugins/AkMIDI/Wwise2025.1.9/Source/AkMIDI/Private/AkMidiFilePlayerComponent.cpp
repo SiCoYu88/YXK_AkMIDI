@@ -75,6 +75,13 @@ void UAkMidiFilePlayerComponent::Stop(bool bSendAllNotesOff)
 		SendAllNotesOff();
 	}
 
+	// StopMIDIOnEvent only releases notes. End the associated Wwise Event
+	// instance as well so callers waiting for AK_EndOfEvent are notified.
+	if (TargetMidiComponent)
+	{
+		TargetMidiComponent->StopMidiEvent(TargetAkEvent);
+	}
+
 	CurrentPlaybackTimeSeconds = 0.0;
 	CurrentEventIndex = 0;
 	ResetActiveNotes();
@@ -162,6 +169,12 @@ void UAkMidiFilePlayerComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	if (CurrentEventIndex >= LoadedFileData.Events.Num() && CurrentPlaybackTimeSeconds >= LoadedFileData.DurationSeconds)
 	{
 		SendAllNotesOff();
+		// Releasing MIDI notes is not enough to finish a looped/continuous Wwise
+		// Event. Stop the Event instance so its AK_EndOfEvent callback is emitted.
+		if (TargetMidiComponent)
+		{
+			TargetMidiComponent->StopMidiEvent(TargetAkEvent);
+		}
 		PlayerState = EAkMidiFilePlayerState::Finished;
 	}
 }

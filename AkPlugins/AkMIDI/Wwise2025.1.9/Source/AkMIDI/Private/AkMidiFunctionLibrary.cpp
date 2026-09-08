@@ -2,6 +2,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "AkMidiFunctionLibrary.h"
+#include "AkAudioEvent.h"
 
 UAkMidiMessage* UAkMidiFunctionLibrary::CreateAkMidiMessage(
 	EAkMessageType NoteType,
@@ -32,6 +33,51 @@ int32 UAkMidiFunctionLibrary::PostMidiEvent(
 		return AK_INVALID_PLAYING_ID;
 
 	return MidiComponent->PostMidiEvent(AkMidiMessages, AkEvent);
+}
+
+int32 UAkMidiFunctionLibrary::PostMidiEventOnActor(
+	UAkAudioEvent* AkEvent,
+	AActor* Actor,
+	TArray<UAkMidiMessage*> AkMidiMessages,
+	int32 PlayingID,
+	int32 CallbackMask,
+	const FOnAkPostEventCallback& PostEventCallback,
+	bool bStopWhenAttachedToDestroyed)
+{
+	if (!IsValid(AkEvent) || AkMidiMessages.IsEmpty() || AkMidiMessages.Num() > MAX_uint16)
+	{
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	TArray<AkMIDIPost> MidiPosts;
+	MidiPosts.Reserve(AkMidiMessages.Num());
+	for (const UAkMidiMessage* MidiMessage : AkMidiMessages)
+	{
+		if (!IsValid(MidiMessage))
+		{
+			continue;
+		}
+
+		AkMIDIPost MidiPost{};
+		if (MidiMessage->ToAkMIDIPost(MidiPost))
+		{
+			MidiPosts.Add(MidiPost);
+		}
+	}
+
+	if (MidiPosts.IsEmpty())
+	{
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	return AkEvent->PostMIDIOnActor(
+		Actor,
+		MidiPosts.GetData(),
+		static_cast<AkUInt16>(MidiPosts.Num()),
+		static_cast<AkPlayingID>(PlayingID),
+		&PostEventCallback,
+		static_cast<AkCallbackType>(CallbackMask),
+		bStopWhenAttachedToDestroyed);
 }
 
 bool UAkMidiFunctionLibrary::StopMidiEvent(
