@@ -1,8 +1,8 @@
-# AkAudio H3DWwise 版本升级迁移指南
+# AkAudio 与 AudiokineticTools H3DWwise 版本升级迁移指南
 
 ## 1. 文档目的
 
-本文记录将 AkMIDI 对 `AkAudio` 的定制功能从一个 Wwise Unreal Integration 版本迁移到新版本时的处理方法、冲突决策和验证步骤。
+本文记录将 AkMIDI 对 `AkAudio` 和 `AudiokineticTools` 的定制功能从一个 Wwise Unreal Integration 版本迁移到新版本时的处理方法、冲突决策和验证步骤。
 
 本次实际迁移基线：
 
@@ -13,7 +13,7 @@
 | 定制代码标记 | `#pragma region H3DWwise` |
 | 迁移日期 | 2026-09-08 |
 
-本文只适用于 `AkAudio` 内由 `H3DWwise` 标记的 AkMIDI/Wwise 定制。不要用旧版本文件整体覆盖新版本文件，也不要把本指南直接套用到 Niagara 系统。
+本文只适用于 `AkAudio` 和 `AudiokineticTools` 内由 `H3DWwise` 标记的 AkMIDI/Wwise 定制及其直接依赖。不要用旧版本文件整体覆盖新版本文件，也不要把本指南直接套用到 Niagara 系统。
 
 ## 2. 核心原则
 
@@ -27,7 +27,7 @@
 
 ## 3. 本次迁移范围
 
-本次目标版本最终包含 18 个 `H3DWwise` region，分布如下。
+本次目标版本的 `AkAudio` 包含 18 个 `H3DWwise` region；`AudiokineticToolsModule.cpp` 另包含 2 个，分布如下。
 
 | 文件 | Region 数 | 迁移内容 |
 | --- | ---: | --- |
@@ -38,6 +38,9 @@
 | `Classes/AkGameplayTypes.h` | 2 | `EnableGetMusicPlayPosition` 枚举和静态校验 |
 | `Classes/AkGameplayStatics.h` | 2 | 蓝图函数声明、`AKTools::EnumToString` |
 | `Private/AkGameplayStatics.cpp` | 4 | 附加头文件、PostEvent 日志、查询/Seek/Flush/回调发布功能、SetState 日志 |
+| `AudiokineticTools/Private/AudiokineticToolsModule.cpp` | 2 | 引入 `AssetTypeActions_AkMidiMessage.h`、注册 `FAssetTypeActions_AkMidiMessage` |
+
+`AudiokineticTools.Build.cs` 还使用一组 `#region H3DWwise` / `#endregion` 标记 `AkMIDI` 私有模块依赖。它不是 `#pragma region`，因此不计入上表的 20 个 pragma region，但必须随功能一并核验。
 
 以下冲突代码按本次决策不迁移：
 
@@ -99,6 +102,36 @@ FAkAudioDevice::StopPlayingID(...)
 `UAkGameplayStatics` 将这些能力暴露给蓝图，并通过 `bUseAkMusicHierarchy` 区分普通声音和 Interactive Music Hierarchy。
 
 使用 `GetPlayingSegmentInfo` 前，发布事件的回调掩码必须包含 `AK_EnableGetMusicPlayPosition`。因此需要同步 `EAkCallbackType::EnableGetMusicPlayPosition = 21`。
+
+### 4.4 MIDI Message 编辑器资产注册
+
+`AudiokineticToolsModule.cpp` 中的两个 `H3DWwise` region 必须成组迁移：
+
+```cpp
+#pragma region H3DWwise
+#include "AssetTypeActions_AkMidiMessage.h"
+#pragma endregion
+```
+
+以及 `FAudiokineticToolsModule::StartupModule()` 中的资产类型注册：
+
+```cpp
+#pragma region H3DWwise
+MakeShared<FAssetTypeActions_AkMidiMessage>(AudiokineticAssetCategoryBit),
+#pragma endregion
+```
+
+这两处代码的完整依赖链是：
+
+```text
+AudiokineticTools.Build.cs 中的 AkMIDI 私有依赖
+  -> AssetTypeActions_AkMidiMessage.h/.cpp
+  -> AkMidiMessageFactory.h/.cpp
+  -> UAkMidiMessage
+  -> AudiokineticToolsModule.cpp 引入并注册资产类型
+```
+
+迁移时必须确认上述文件存在，并确认 `AudiokineticTools.Build.cs` 的 `PrivateDependencyModuleNames` 包含 `AkMIDI`。仅复制 `AudiokineticToolsModule.cpp` 中的两个 region，会因缺少类型声明、实现或模块依赖而导致编译失败。
 
 ## 5. 本次冲突及处理结论
 
@@ -221,6 +254,15 @@ PlayingID = %d, OffsetMS = %d
 
 以后不应以“文件末尾”自动推断任意未闭合 region 的范围，必须先人工确认。
 
+### 5.7 `AudiokineticToolsModule.cpp` 核验结论
+
+项目实际使用的 `AudiokineticToolsModule.cpp` 与 `Wwise2025.1.10.9233` 快照中的目标文件逐行比较后完全一致，目标文件已经包含以下两处定制：
+
+- `AssetTypeActions_AkMidiMessage.h` 头文件引入。
+- `FAssetTypeActions_AkMidiMessage` 资产类型注册。
+
+因此本次不重复插入代码，也不改动目标版本控制流。以后升级时仍需逐项核对这两处位置，不能仅以目标文件中出现 `H3DWwise` 字样判断依赖完整。
+
 ## 6. 推荐升级流程
 
 ### 第一步：准备基线
@@ -237,6 +279,8 @@ PlayingID = %d, OffsetMS = %d
 ```powershell
 rg -n "#pragma\s+region\s+H3DWwise|#pragma\s+region\s+H3D" <源AkAudio目录>
 rg -n "PostMidiEvent|StopMidiEvent|PostMIDIOn|EnableGetMusicPlayPosition" <源AkAudio目录>
+rg -n "H3DWwise|AssetTypeActions_AkMidiMessage" <源AudiokineticTools目录>/Private/AudiokineticToolsModule.cpp
+rg -n "AkMIDI|H3DWwise" <源AudiokineticTools目录>/AudiokineticTools.Build.cs
 ```
 
 不要只搜索 region。部分必要适配可能位于 region 外，例如为解决枚举冲突而注释的静态断言。
@@ -262,7 +306,9 @@ rg -n "PostMidiEvent|StopMidiEvent|PostMIDIOn|EnableGetMusicPlayPosition" <源Ak
 2. `UAkAudioEvent` MIDI 发布和查询 API。
 3. `EAkCallbackType` 扩展。
 4. `UAkGameplayStatics` 蓝图接口和辅助工具。
-5. 目标现有函数中的日志或保护性改造。
+5. `AudiokineticTools` 的模块依赖、MIDI Message Factory 和资产类型实现。
+6. `AudiokineticToolsModule.cpp` 的头文件引入和资产类型注册。
+7. 目标现有函数中的日志或保护性改造。
 
 每完成一层，立即确认声明、实现和调用点数量，避免最后才发现缺少底层依赖。
 
@@ -293,6 +339,9 @@ rg -n "PostMidiEvent|StopMidiEvent|PostMIDIOn|EnableGetMusicPlayPosition" <源Ak
 - [ ] 目标 `AkAudio` 中没有遗留普通 `H3D` region。
 - [ ] 没有 `<<<<<<<`、`=======`、`>>>>>>>` 合并冲突标记。
 - [ ] 没有损坏替换字符 `�`。
+- [ ] `AudiokineticToolsModule.cpp` 同时包含 MIDI Message 资产类型的 include 和注册代码。
+- [ ] `AudiokineticTools.Build.cs` 包含 `AkMIDI` 私有模块依赖。
+- [ ] `AssetTypeActions_AkMidiMessage` 和 `AkMidiMessageFactory` 的声明、实现文件均存在。
 - [ ] Git 差异只包含确认过的文件和冲突处理。
 
 可使用以下搜索命令辅助检查：
@@ -307,8 +356,11 @@ rg -n "�" <目标AkAudio目录>
 本次迁移结果为：
 
 ```text
-H3DWwise regions: 18
-Plain H3D regions: 0
+AkAudio H3DWwise regions: 18
+AudiokineticToolsModule.cpp H3DWwise regions: 2
+本指南覆盖的 H3DWwise regions: 20
+AkAudio plain H3D regions: 0
+AudiokineticToolsModule.cpp plain H3D regions: 0
 所有 pragma region 已闭合
 没有合并冲突标记
 没有损坏替换字符
@@ -322,6 +374,7 @@ Plain H3D regions: 0
 2. 编译项目的 Editor Target。
 3. 确认 Unreal Header Tool 能处理新增 `UFUNCTION` 和 `EAkCallbackType`。
 4. 确认 `AkAudio`、`AkMIDI`、`AudiokineticTools` 均成功链接。
+5. 确认 `AudiokineticTools` 可以解析 `UAkMidiMessage`、资产类型 Action 和 Factory。
 
 ### 7.3 运行时检查
 
@@ -336,6 +389,8 @@ Plain H3D regions: 0
 - [ ] `SeekOnEvent` 的百分比和毫秒接口均可用。
 - [ ] `PostEvent_WithFlush` 和 `PostEventWithSeek` 行为符合预期。
 - [ ] 蓝图中能找到新增节点，参数默认值和分类正确。
+- [ ] 内容浏览器可以创建 `Audiokinetic Midi Message` 资产。
+- [ ] MIDI Message 资产可以使用简单资产编辑器打开。
 
 ## 8. 后续版本迁移记录模板
 
@@ -349,6 +404,7 @@ Plain H3D regions: 0
 - 源目录：
 - 目标目录：
 - 迁移 region 数：
+- `AudiokineticToolsModule.cpp` region 数：
 - 目标 API 签名变化：
 - 冲突文件：
 - 决策：
