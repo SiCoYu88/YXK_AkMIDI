@@ -440,6 +440,8 @@ public:
 	 * @param PlayingID PostEvent return value.
 	 */
 	int32 GetSourceActiveDuration(int32 PlayingID);
+
+	int32 GetSourceStreamBuffering(int32 PlayingID);
 #pragma endregion
 
 private:

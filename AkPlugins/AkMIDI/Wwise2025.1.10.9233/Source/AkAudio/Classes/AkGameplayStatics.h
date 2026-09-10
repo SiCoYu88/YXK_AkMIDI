@@ -132,8 +132,16 @@ public:
 
 
 	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
-
 	static int32 GetSourceActiveDuration(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy = false);
+
+	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
+	static int32 GetSourceStreamBuffering(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy = false);
+
+	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
+	static int32 GetBufferTick();
+
+	UFUNCTION(BlueprintCallable,BlueprintPure, BlueprintCosmetic, Category = "H3D | Wwise")
+	static int32 GetSampleTick();
 
 	/** Posts a Wwise Event attached to and following the root component of the specified actor.
 	 *

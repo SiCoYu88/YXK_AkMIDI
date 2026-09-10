@@ -836,6 +836,54 @@ int32 UAkAudioEvent::GetSourceActiveDuration(int32 PlayingID)
 	}
 }
 
+
+int32 UAkAudioEvent::GetSourceStreamBuffering(int32 PlayingID)
+{
+	SCOPED_AKAUDIO_EVENT_2(TEXT("UAkAudioEvent::GetSourceActiveDuration"));
+	auto* AudioDevice = FAkAudioDevice::Get();
+	if (UNLIKELY(!AudioDevice))
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("Failed to post AkAudioEvent '%s' without an Audio Device."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	if (UNLIKELY(!AudioDevice->IsInitialized()))
+	{
+		UE_LOG(LogAkAudio, Verbose, TEXT("Failed to post AkAudioEvent '%s' with the Sound Engine uninitialized."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	auto SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (UNLIKELY(!SoundEngine))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("Failed to post AkAudioEvent '%s' without a Sound Engine."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	auto ExternalSourceManager = IWwiseExternalSourceManager::Get();
+	if (UNLIKELY(!ExternalSourceManager))
+	{
+		UE_LOG(LogAkAudio, Warning, TEXT("Failed to post AkAudioEvent '%s' without the External Source Manager."), *GetName());
+		return AK_INVALID_PLAYING_ID;
+	}
+
+	AkTimeMs CurrentPosition = 0;
+	bool bIsBuffering = false;
+	auto Result = SoundEngine->GetSourceStreamBuffering(PlayingID, CurrentPosition, bIsBuffering);
+	if (Result == AK_Success)
+	{
+		return CurrentPosition;
+	}
+	else
+	{
+#if WITH_EDITOR
+		//GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Red, TEXT("GetSourcePlayPosition FAILED!"), false);
+		UE_LOG(LogAkAudio, Log, TEXT("[%d] GetSourceStreamBuffering is -1, FAILED! Plz Check it!!"), UKismetSystemLibrary::GetFrameCount());
+#endif
+		return AK_INVALID_PLAYING_ID;
+	}
+}
+
 #pragma endregion
 
 template <typename FCreateCallbackPackage>

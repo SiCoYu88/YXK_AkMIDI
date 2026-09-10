@@ -194,6 +194,38 @@ int32 UAkGameplayStatics::GetSourceActiveDuration(UAkAudioEvent* AkEvent, int32 
 	}
 }
 
+int32 UAkGameplayStatics::GetSourceStreamBuffering(UAkAudioEvent* AkEvent, int32 PlayingID, bool bUseAkMusicHierarchy)
+{
+	{
+		FString TraceName = FString::Printf(TEXT("[WwiseDebug]GetSourceStreamBuffering"));
+		TRACE_CPUPROFILER_EVENT_SCOPE_STR(*TraceName);
+		if (AkEvent) {
+			return AkEvent->GetSourceStreamBuffering(PlayingID);
+		}
+		return AK_INVALID_PLAYING_ID;
+	}
+}
+
+int32 UAkGameplayStatics::GetBufferTick()
+{
+	IWwiseSoundEngineAPI* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (SoundEngine) 
+	{
+		return SoundEngine->GetBufferTick();
+	}
+	return 0;
+}
+
+int32 UAkGameplayStatics::GetSampleTick()
+{
+	IWwiseSoundEngineAPI* SoundEngine = IWwiseSoundEngineAPI::Get();
+	if (SoundEngine) 
+	{
+		return SoundEngine->GetSampleTick();
+	}
+	return 0;
+}
+
 int32 UAkGameplayStatics::SeekOnEvent(UAkAudioEvent* AkEvent, class AActor* Actor, const int32 PlayingID, const float OffsetPercent)
 {
 	auto* SoundEngine = IWwiseSoundEngineAPI::Get();
