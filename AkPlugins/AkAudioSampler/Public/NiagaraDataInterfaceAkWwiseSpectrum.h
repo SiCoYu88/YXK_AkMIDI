@@ -143,6 +143,8 @@ public:
 		void* PerInstanceData,
 		FNiagaraSystemInstance* SystemInstance,
 		float DeltaSeconds) override;
+	virtual int32 PerInstanceDataPassedToRenderThreadSize() const override { return 0; }
+	virtual bool HasTickGroupPrereqs() const override { return false; }
 	virtual void GetVMExternalFunction(
 		const FVMExternalFunctionBindingInfo& BindingInfo,
 		void* InstanceData,

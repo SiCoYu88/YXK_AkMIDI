@@ -889,7 +889,7 @@ void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetFunctionsInternal(
 	DefaultSignature.bSupportsGPU = false;
 
 	FNiagaraFunctionSignature& SpectrumSignature = OutFunctions.Add_GetRef(DefaultSignature);
-	SpectrumSignature.Name = UNiagaraDataInterfaceAudioSpectrum::GetSpectrumFunctionName;
+	SpectrumSignature.Name = UNiagaraDataInterfaceAkWwiseSpectrum::GetSpectrumFunctionName;
 	SpectrumSignature.Inputs.Emplace(
 		FNiagaraTypeDefinition::GetFloatDef(),
 		TEXT("NormalizedPositionInSpectrum"));
@@ -897,7 +897,7 @@ void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetFunctionsInternal(
 	SpectrumSignature.Outputs.Emplace(FNiagaraTypeDefinition::GetFloatDef(), TEXT("Amplitude"));
 
 	FNiagaraFunctionSignature& ChannelsSignature = OutFunctions.Add_GetRef(DefaultSignature);
-	ChannelsSignature.Name = UNiagaraDataInterfaceAudioSpectrum::GetNumChannelsFunctionName;
+	ChannelsSignature.Name = UNiagaraDataInterfaceAkWwiseSpectrum::GetNumChannelsFunctionName;
 	ChannelsSignature.Outputs.Emplace(FNiagaraTypeDefinition::GetIntDef(), TEXT("NumChannels"));
 }
 #endif
@@ -911,13 +911,13 @@ void UNiagaraDataInterfaceAkWwiseAudioSpectrum::GetVMExternalFunction(
 	FVMExternalFunction& OutFunc)
 {
 	(void)InstanceData;
-	if (BindingInfo.Name == UNiagaraDataInterfaceAudioSpectrum::GetSpectrumFunctionName)
+	if (BindingInfo.Name == UNiagaraDataInterfaceAkWwiseSpectrum::GetSpectrumFunctionName)
 	{
 		NDI_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetSpectrumValue)::Bind(
 			this,
 			OutFunc);
 	}
-	else if (BindingInfo.Name == UNiagaraDataInterfaceAudioSpectrum::GetNumChannelsFunctionName)
+	else if (BindingInfo.Name == UNiagaraDataInterfaceAkWwiseSpectrum::GetNumChannelsFunctionName)
 	{
 		NDI_FUNC_BINDER(UNiagaraDataInterfaceAkWwiseAudioSpectrum, GetNumChannels)::Bind(
 			this,

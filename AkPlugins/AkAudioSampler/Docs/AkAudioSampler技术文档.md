@@ -395,3 +395,59 @@ Wwise 音频数据或屏幕表现。最终必须在 Editor/PIE 中播放经过�
 8. Editor/PIE 目视验证结果。
 
 不要只记录“修改成功”。方案库的目标是让后续问题能够通过结构和症状快速归类。
+
+## 11. UE5.8：Audio Spectrum 函数名与生命周期兼容
+
+### 11.1 可见症状
+
+升级到 UE5.8 后，`UNiagaraDataInterfaceAkWwiseAudioSpectrum` 编译失败：
+
+```text
+UNiagaraDataInterfaceAudioSpectrum 没有成员 GetSpectrumFunctionName
+UNiagaraDataInterfaceAudioSpectrum 没有成员 GetNumChannelsFunctionName
+```
+
+### 11.2 根因
+
+UE5.8 从 `UNiagaraDataInterfaceAudioSpectrum` 的公共声明中移除了这两个静态
+`FName`，同时将该类从继承 `UNiagaraDataInterfaceAudioSubmix` 改为直接继承
+`UNiagaraDataInterface`，并加入共享音频采样资源和新的每实例生命周期接口。
+
+Niagara 对外函数名仍为 `AudioSpectrum` 和 `GetNumChannels`。不能继续依赖父类的
+公共名称常量，也不能只消除编译错误而忽略父类新增的渲染线程数据传递和 Tick Group
+依赖。
+
+### 11.3 最终方案
+
+1. 兼容适配器的函数签名注册和 VM 绑定统一使用插件自有的
+   `UNiagaraDataInterfaceAkWwiseSpectrum::GetSpectrumFunctionName` 与
+   `GetNumChannelsFunctionName`；
+2. 保持 `UNiagaraDataInterfaceAkWwiseAudioSpectrum` 继承 UE Audio Spectrum，确保原
+   `AudioSpectrumUpdate` 输入类型和既有 Niagara 资产继续兼容；
+3. 保持适配器为 `CPUSim`；
+4. 覆盖 `PerInstanceDataPassedToRenderThreadSize()` 并返回 0，禁止调用 UE5.8 父类的
+   渲染线程实例数据传递；
+5. 覆盖 `HasTickGroupPrereqs()` 并返回 false，禁止父类使用其私有实例数据计算 Tick
+   Group；
+6. 继续由适配器自己的 `InitPerInstanceData`、`PerInstanceTick` 和
+   `DestroyPerInstanceData` 管理 Wwise 快照与回调引用，不调用父类对应实现。
+
+不要将 Niagara 对外名称改为 C++ 方法名 `GetSpectrumValue`，也不要修改 UE5.8 引擎
+源码重新加入已删除的静态成员。
+
+### 11.4 验证记录
+
+验证环境：UE 5.8.2，`WwiseDemoGameEditor Win64 Development`。
+
+- AkAudioSampler UHT、C++ 编译和 DLL 链接成功；
+- 原 `GetSpectrumFunctionName`、`GetNumChannelsFunctionName` 编译错误消失；
+- 当前参考资产为
+  `/Game/WwiseAssets/AkVisualize/NiagaraWwiseVisualizer/Examples/NS_MeshLines`；
+- 无界面结构检查成功，主链保留
+  `NiagaraDataInterfaceAkWwiseAudioSpectrum`、`AudioSpectrumUpdate` 和 Ribbon/Sprite
+  Renderer；
+- 次级 Emitter 保留 `NiagaraDataInterfaceParticleRead` 跨 Emitter 依赖；
+- 检查进程正常退出，无 AkAudioSampler 加载或实例数据生命周期错误。
+
+本次使用 `-nullrhi -nosound`，因此尚未覆盖真实 Wwise Bus 数据和屏幕表现。最终 PIE
+目视验证仍需播放经过目标 Bus 的音频后执行。
