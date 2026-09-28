@@ -54,7 +54,7 @@ void FAkAudioSamplerModule::StartupModule()
 		const FString DllPath = FPaths::Combine(
 			WwiseSoundEnginePlugin->GetBaseDir(),
 			TEXT("ThirdParty"),
-			TEXT("x64_vc170"),
+			TEXT("x64_vc180"),
 			Configuration,
 			TEXT("bin"),
 			TEXT("AudioBusHacker.dll"));
