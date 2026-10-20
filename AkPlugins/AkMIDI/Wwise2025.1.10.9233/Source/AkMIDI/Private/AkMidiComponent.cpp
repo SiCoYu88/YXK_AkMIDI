@@ -346,6 +346,18 @@ bool UAkMidiComponent::PostMidiEvent()
 
 int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent)
 {
+	return PostMidiEventInternal(MoveTemp(AkMidiMessages), AkEvent);
+}
+
+int32 UAkMidiComponent::PostMidiEventWithCallback(TArray<UAkMidiMessage*> AkMidiMessages,
+	UAkAudioEvent* AkEvent, int32 CallbackMask, const FOnAkPostEventCallback& PostEventCallback)
+{
+	return PostMidiEventInternal(MoveTemp(AkMidiMessages), AkEvent, &PostEventCallback, CallbackMask);
+}
+
+int32 UAkMidiComponent::PostMidiEventInternal(TArray<UAkMidiMessage*> AkMidiMessages,
+	UAkAudioEvent* AkEvent, const FOnAkPostEventCallback* PostEventCallback, int32 CallbackMask)
+{
 	if ((InputSource != EMidiInputSource::Unreal))
 		return AK_INVALID_PLAYING_ID;
 
@@ -443,7 +455,8 @@ int32 UAkMidiComponent::PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UA
 	}
 
 	AkPlayingID PlayingID = TargetEvent->PostMIDIOnGameObject(
-		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID);
+		this, Posts.GetData(), static_cast<AkUInt16>(Posts.Num()), TargetPlayingID,
+		PostEventCallback, static_cast<AkCallbackType>(CallbackMask));
 
 	for (auto& Post : Posts) 
 	{

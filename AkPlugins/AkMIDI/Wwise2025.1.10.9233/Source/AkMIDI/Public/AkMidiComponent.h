@@ -76,6 +76,15 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
 	int32 PostMidiEvent(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent *AkEvent = nullptr);
 
+	/** Posts on this component with a Wwise callback, preserving MIDI FX and PlayingID routing. */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent",
+		meta = (AutoCreateRefTerm = "PostEventCallback"))
+	int32 PostMidiEventWithCallback(
+		TArray<UAkMidiMessage*> AkMidiMessages,
+		UAkAudioEvent* AkEvent,
+		UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/AkAudio.EAkCallbackType")) int32 CallbackMask,
+		const FOnAkPostEventCallback& PostEventCallback);
+
 	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category = "AkMIDI|AkMidiComponent")
 	bool StopMidiEvent(UAkAudioEvent *AkEvent = nullptr);
 
@@ -102,6 +111,9 @@ public:
 
 
 private:
+	int32 PostMidiEventInternal(TArray<UAkMidiMessage*> AkMidiMessages, UAkAudioEvent* AkEvent,
+		const FOnAkPostEventCallback* PostEventCallback = nullptr, int32 CallbackMask = 0);
+
 	// 环形复用池：OnMessageReceived 广播出去的 UAkMidiMessage* 会在后续消息到来时被覆盖。
 	// 蓝图侧应在回调内同步读取所需数据，切勿异步/延迟持有该指针，否则会读到脏数据。
 	TArray<UAkMidiMessage*> MessagePool;
