@@ -1,0 +1,18 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "WwiseMedia",
+  "Description": "Media Framework audio playback through Wwise Audio Input with per-source positioning and media timing.",
+  "Category": "Audio",
+  "CreatedBy": "M2",
+  "CanContainContent": false,
+  "EnabledByDefault": false,
+  "Modules": [
+    { "Name": "WwiseMediaRuntime", "Type": "Runtime", "LoadingPhase": "Default" }
+  ],
+  "Plugins": [
+    { "Name": "Wwise", "Enabled": true },
+    { "Name": "WwiseSoundEngine", "Enabled": true }
+  ]
+}

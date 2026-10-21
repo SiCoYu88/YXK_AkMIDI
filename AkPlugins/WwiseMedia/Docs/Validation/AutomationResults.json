@@ -1,0 +1,59 @@
+﻿{
+	"devices": [
+		{
+			"deviceName": "YXK10231",
+			"instance": "C914AC2A4A6E78B14CE548B548005836",
+			"instanceName": "YXK10231-42092",
+			"platform": "WindowsEditor",
+			"oSVersion": "Windows 10 (22H2) [10.0.19045.6456] ",
+			"model": "Default",
+			"gPU": "NVIDIA GeForce RTX 4070 Ti",
+			"cPUModel": "12th Gen Intel(R) Core(TM) i7-12700KF",
+			"rAMInGB": 64,
+			"renderMode": "SM6",
+			"rHI": "",
+			"appInstanceLog": ""
+		}
+	],
+	"reportCreatedOn": "2026.10.20-09.27.15",
+	"succeeded": 2,
+	"succeededWithWarnings": 0,
+	"failed": 0,
+	"notRun": 0,
+	"inProcess": 0,
+	"totalDuration": 0.024969696998596191,
+	"comparisonExported": false,
+	"comparisonExportDirectory": "",
+	"tests": [
+		{
+			"testDisplayName": "FlushRejectsOldAudio",
+			"fullTestPath": "AkMedia.Bridge.FlushRejectsOldAudio",
+			"tags": [],
+			"state": "Success",
+			"deviceInstance": [
+				"C914AC2A4A6E78B14CE548B548005836"
+			],
+			"duration": 0.0078787989914417267,
+			"dateTime": "2026.10.20-09.27.15",
+			"entries": [],
+			"warnings": 0,
+			"errors": 0,
+			"artifacts": []
+		},
+		{
+			"testDisplayName": "ResampleAndPause",
+			"fullTestPath": "AkMedia.Bridge.ResampleAndPause",
+			"tags": [],
+			"state": "Success",
+			"deviceInstance": [
+				"C914AC2A4A6E78B14CE548B548005836"
+			],
+			"duration": 0.017090898007154465,
+			"dateTime": "2026.10.20-09.27.15",
+			"entries": [],
+			"warnings": 0,
+			"errors": 0,
+			"artifacts": []
+		}
+	]
+}

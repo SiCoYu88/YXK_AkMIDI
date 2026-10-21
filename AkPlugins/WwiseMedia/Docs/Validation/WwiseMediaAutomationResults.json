@@ -1,0 +1,59 @@
+﻿{
+	"devices": [
+		{
+			"deviceName": "YXK10231",
+			"instance": "B86282FB40EAAEFFCB00D8BB2B24C387",
+			"instanceName": "YXK10231-41660",
+			"platform": "WindowsEditor",
+			"oSVersion": "Windows 10 (22H2) [10.0.19045.6456] ",
+			"model": "Default",
+			"gPU": "NVIDIA GeForce RTX 4070 Ti",
+			"cPUModel": "12th Gen Intel(R) Core(TM) i7-12700KF",
+			"rAMInGB": 64,
+			"renderMode": "SM6",
+			"rHI": "",
+			"appInstanceLog": ""
+		}
+	],
+	"reportCreatedOn": "2026.10.20-09.44.40",
+	"succeeded": 2,
+	"succeededWithWarnings": 0,
+	"failed": 0,
+	"notRun": 0,
+	"inProcess": 0,
+	"totalDuration": 0.029250200837850571,
+	"comparisonExported": false,
+	"comparisonExportDirectory": "",
+	"tests": [
+		{
+			"testDisplayName": "FlushRejectsOldAudio",
+			"fullTestPath": "WwiseMedia.Bridge.FlushRejectsOldAudio",
+			"tags": [],
+			"state": "Success",
+			"deviceInstance": [
+				"B86282FB40EAAEFFCB00D8BB2B24C387"
+			],
+			"duration": 0.0081890001893043518,
+			"dateTime": "2026.10.20-09.44.40",
+			"entries": [],
+			"warnings": 0,
+			"errors": 0,
+			"artifacts": []
+		},
+		{
+			"testDisplayName": "ResampleAndPause",
+			"fullTestPath": "WwiseMedia.Bridge.ResampleAndPause",
+			"tags": [],
+			"state": "Success",
+			"deviceInstance": [
+				"B86282FB40EAAEFFCB00D8BB2B24C387"
+			],
+			"duration": 0.021061200648546219,
+			"dateTime": "2026.10.20-09.44.40",
+			"entries": [],
+			"warnings": 0,
+			"errors": 0,
+			"artifacts": []
+		}
+	]
+}

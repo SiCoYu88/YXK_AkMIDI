@@ -1,0 +1,8 @@
+/Binaries/
+/Intermediate/
+/Saved/
+/Tests/*.exe
+/Tests/*.obj
+/Tests/*.pdb
+/Tests/*.ilk
+
