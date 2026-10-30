@@ -27,6 +27,8 @@ the specific language governing permissions and limitations under the License.
 #ifndef AudioBusHackerFXFactory_H
 #define AudioBusHackerFXFactory_H
 
+#include <AK/SoundEngine/Common/IAkPlugin.h>
+
 #ifndef AUDIO_BUS_HACKER_NO_STATIC_LINK
 AK_STATIC_LINK_PLUGIN(AudioBusHackerFX);
 #endif

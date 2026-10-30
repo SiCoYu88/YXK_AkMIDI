@@ -361,7 +361,7 @@ AkReal32 AudioBusHackerFX::LinearToDb(AkReal32 in_fLinear)
     return value < kMinimumDb ? kMinimumDb : value;
 }
 
-int SetAudioBusHackerCallbacks(
+extern "C" AK_DLLEXPORT int SetAudioBusHackerCallbacks(
     AkAudioBusHackerPluginExecuteCallbackFunc in_ABHExecCallback
 )
 {
@@ -369,7 +369,7 @@ int SetAudioBusHackerCallbacks(
     return 8;
 }
 
-int SetAudioBusHackerVisualizationCallback(
+extern "C" AK_DLLEXPORT int SetAudioBusHackerVisualizationCallback(
     AkAudioBusHackerVisualizationCallbackFunc in_visualizationCallback
 )
 {

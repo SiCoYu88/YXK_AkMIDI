@@ -415,7 +415,9 @@ SDK/include/AK/Plugin/AudioBusHackerFXFactory.h
 
 ### 9.6 Android 状态
 
-仓库中的 Android `.mk` 仍属于 2023.1 生成物。当前没有完成 Wwise 2025.1.4 Android 平台迁移和验证，不能把这些文件视为可发布产物。补装对应 Wwise Android 平台包后，必须重新 Premake、编译、部署并在真机验证。
+Android 现在使用 `Android/CMakeLists.txt` 和 `build_android.bat`，不再使用 2023.1 `.mk`。
+Wwise 2025.1.10.9233 / NDK r27c 的 arm64-v8a、x86_64 三种配置已完成编译、链接和符号验证。
+构建、安装包与 Unreal 静态库部署见 [ANDROID.md](ANDROID.md)。设备运行和完整 APK 尚待验证。
 
 ## 10. 链接与集成
 
@@ -463,6 +465,6 @@ extern "C" AK_DLLEXPORT int SetAudioBusHackerVisualizationCallback(...);
 - 当前 Authoring GUI 只接收 Monitor 快照，没有实现可见的电平、波形或频谱绘制。
 - `Placeholder` 参数不参与实际处理。
 - Audio Object 路径未作为已验证能力。
-- Android 的 Wwise 2025.1.4/2025.1.9 构建尚未验证。
+- Android 已验证 Wwise 2025.1.10.9233 的构建与链接；2025.1.4/2025.1.9 和设备运行尚未验证。
 
 更精简的数据协议说明见 [VISUALIZATION.md](VISUALIZATION.md)，构建和迁移记录见 [BUILD.md](BUILD.md)。

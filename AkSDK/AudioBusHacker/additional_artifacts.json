@@ -12,6 +12,13 @@
             "Authoring/Data/Factory Assets/AudioBusHacker": ["FactoryAssets/*"]
         }
     ],
+    "Android": [
+        {
+            "SDK/include/AK/Plugin": [
+                "SoundEnginePlugin/AudioBusHackerFXFactory.h"
+            ]
+        }
+    ],
     "Windows_vc170": [
         {
             "SDK/include/AK/Plugin": [

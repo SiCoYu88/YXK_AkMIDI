@@ -303,18 +303,18 @@ Authoring 包只负责让 Wwise 设计工具识别插件。游戏还必须包含
 
 若重新构建后仍使用相同 bundle ID/版本，Launcher 可能把它视为已安装版本。应先卸载旧插件再安装，或为正式发布递增 `year.major.minor.build` 版本。
 
-## 11. Android（尚未迁移验证）
+## 11. Android
 
-当前安装中没有 Wwise 2025.1.4 Android SDK 平台包，因此仓库里的 Android `.mk` 仍属于 2023.1 生成物。通过 Wwise Launcher 补装 Android 平台后执行：
+当前支持通过独立 CMake 入口构建 Android 静态库和共享库，实际验证版本为
+Wwise 2025.1.10.9233 / NDK r27c。详见 [ANDROID.md](ANDROID.md)。
+仓库中的旧 `.mk` 属于 2023.1 生成物，不再作为当前 Android 构建入口。
 
 ```powershell
-& $Python $Wp premake Android
-& $Python $Wp build Android -c Profile -x arm64-v8a
-& $Python $Wp build Android -c Release -x arm64-v8a
-& $Python $Wp package Android -v 2025.1.4.9062
+python scripts/build_android.py all --sdk "H:\Audiokinetic\2025.1.10.9233\SDK"
+python scripts/build_android.py deploy --wwise-plugin "D:\YourGame\Plugins\WwiseSoundEngine"
 ```
 
-NDK、JDK 和 Android SDK 版本必须以 Wwise 2025.1.4 Android 平台文档为准。
+`NDKROOT` 或 `--ndk` 指定 NDK。Wwise SDK、插件和 Unreal 项目版本必须一致。
 
 ## 12. 常见问题
 

@@ -30,7 +30,8 @@ AudioBusHacker 用于读取 Wwise Bus 插入点的混合音频，并向游戏、
 - Wwise Authoring 中没有内置的可视化绘图面板；可视化由外部程序或游戏 UI 完成。
 - 属性面板中的 `Placeholder` 是模板遗留参数，不影响声音和分析结果。
 - 只把 Bus 插入作为已验证路径，不建议用于 Audio Object。
-- Wwise 2025.1.4 和 2025.1.9 的 Android 版本均尚未验证。
+- Android 支持 arm64-v8a / x86_64；已完成 Wwise 2025.1.10.9233 的编译与链接验证，
+  构建和 Unreal 部署见 [ANDROID.md](ANDROID.md)。设备运行与 2025.1.4/2025.1.9 尚未验证。
 
 ## 3. 安装
 
