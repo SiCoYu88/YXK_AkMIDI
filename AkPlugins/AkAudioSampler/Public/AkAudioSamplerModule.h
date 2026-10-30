@@ -6,7 +6,7 @@
 #include "Modules/ModuleManager.h"
 #include "AkAudioDevice.h"
 #define AUDIO_BUS_HACKER_NO_STATIC_LINK
-#include "Ak/Plugin/AudioBusHackerFXFactory.h"
+#include "AK/Plugin/AudioBusHackerFXFactory.h"
 #undef AUDIO_BUS_HACKER_NO_STATIC_LINK
 
 using FSetAudioBusHackerVisualizationCallback = int(*)(AkAudioBusHackerVisualizationCallbackFunc);

@@ -1,15 +1,17 @@
 # AkAudioSampler 可视化数据接入
 
-AkAudioSampler 使用 `AudioBusHacker.dll` 导出的
+AkAudioSampler 使用 AudioBusHacker 提供的
 `SetAudioBusHackerVisualizationCallback`，直接消费 Wwise 侧生成的可视化快照。
 UE 不再接收原始 PCM 或自行执行 FFT。
+Windows 使用 DLL 动态加载，Android 使用同进程静态链接。
 
 ## 前置条件
 
 - Wwise 工程中的目标 Bus 已插入 AudioBusHacker。
 - 使用包含提交 `6ac93bd7d1082d9d88e85575af2d6b81195eb5fb` 的插件源码重新构建。
-- `AudioBusHacker.dll` 已安装到 Wwise Unreal 插件的
-  `ThirdParty/x64_vc170/<Profile|Release|Debug>/bin`。
+- Windows：`AudioBusHacker.dll` 已安装到 WwiseSoundEngine 的
+  `ThirdParty/x64_vc180/<Profile|Release|Debug>/bin`（当前源码使用 vc180）。
+- Android：使用与项目一致的 Wwise SDK 构建并部署 `libAudioBusHackerFX.a`，见下文。
 - `AudioBusHackerFXFactory.h` 已安装到 Wwise SDK 的 `include/AK/Plugin`。
 - 承载 `AkAudioSampler` 模块的父级 `.uplugin` 已声明 Niagara 插件依赖：
 
@@ -20,6 +22,34 @@ UE 不再接收原始 PCM 或自行执行 FFT。
   ```
 
   如果父插件已有 `Plugins` 数组，只添加其中的 Niagara 项，不要建立第二个同名字段。
+
+## Android 构建与接入
+
+在 `AkSDK/AudioBusHacker` 目录执行：
+
+```bat
+build_android.bat all --sdk "H:\Audiokinetic\2025.1.10.9233\SDK" --ndk "C:\Path\To\Android\ndk\27.2.12479018"
+build_android.bat deploy --wwise-plugin "D:\YourGame\Plugins\WwiseSoundEngine"
+```
+
+默认构建 `arm64-v8a`、`x86_64` 的 Debug/Profile/Release，生成 Android SDK 安装包并更新
+`bundle.json`。`--sdk`、`--ndk` 可分别由 `WWISESDK`、`NDKROOT` 环境变量提供。
+部署时校验 Unreal 内 Wwise SDK 的完整版本，复制静态库到：
+
+```text
+Plugins/WwiseSoundEngine/ThirdParty/Android/<ABI>/<Debug|Profile|Release>/lib/libAudioBusHackerFX.a
+```
+
+同时更新 `ThirdParty/include/AK/Plugin/AudioBusHackerFXFactory.h`。AkAudioSampler 的构建规则
+按目标架构和 Wwise 配置显式链接静态库；库缺失时提前报告具体路径和部署方法。
+UE Debug/DebugGame 对应 Wwise Debug，Development 对应 Profile，Test/Shipping 对应 Release。
+Android Server/Program 的空 SoundEngine 构建不引入该静态回调。
+
+Android 日志应出现 `Using statically linked AudioBusHacker visualization API (Android).`。
+不要再加载另一个 `libAudioBusHacker.so`：静态库和共享库各自持有回调状态，混用可能导致
+注册成功但拿不到音频数据。Android SDK 包中的 `.so` 仅供其他动态加载集成使用。
+
+构建、打包、设备验证说明见 `AkSDK/AudioBusHacker/Doc/ANDROID.md`。
 
 ## 蓝图使用
 
@@ -93,7 +123,7 @@ AudioBusHacker 提供 64 个对数分布频点，更新率约为 25 Hz。Niagara
 - `Is Audio Bus Visualization Available` 为 false 时，检查日志中是否出现
   `Loaded AudioBusHacker visualization API`。
 - Windows 下 DLL 必须位于
-  `Plugins/WwiseSoundEngine/ThirdParty/x64_vc170/<Profile|Release|Debug>/bin/AudioBusHacker.dll`。
+  `Plugins/WwiseSoundEngine/ThirdParty/x64_vc180/<Profile|Release|Debug>/bin/AudioBusHacker.dll`。
 - `IsSpectrumValid` 为 false 时，依次检查 Bus 名称、AudioBusHacker 插入位置、音频路由和回调注册。
 - 目前仅支持混合单路频谱；逐声道 Peak/RMS 仍通过 `Get Audio Bus Visualization` 获取。
 

@@ -1,4 +1,5 @@
 using UnrealBuildTool;
+using System.IO;
 
 public class AkAudioSampler : ModuleRules
 {
@@ -71,7 +72,46 @@ public class AkAudioSampler : ModuleRules
 			}
 			);
 
-        // Windows
-       
+        if (Target.Platform == UnrealTargetPlatform.Android
+            && Target.Type != TargetType.Server && Target.Type != TargetType.Program)
+        {
+            AddAndroidLibraries(Target);
+        }
+    }
+
+    private void AddAndroidLibraries(ReadOnlyTargetRules Target)
+    {
+        // Resolve the actual WwiseSoundEngine plugin, including engine installations.
+        string ThirdParty = Path.GetFullPath(Path.Combine(
+            GetModuleDirectory("WwiseSoundEngine"), "..", "..", "ThirdParty"));
+        string Configuration = "Profile";
+        if (Target.Configuration == UnrealTargetConfiguration.Debug
+            || Target.Configuration == UnrealTargetConfiguration.DebugGame)
+        {
+            Configuration = "Debug";
+        }
+        else if (Target.Configuration == UnrealTargetConfiguration.Shipping
+            || Target.Configuration == UnrealTargetConfiguration.Test)
+        {
+            Configuration = "Release";
+        }
+
+        foreach (string Abi in new[] { "arm64-v8a", "x86_64" })
+        {
+            if (!Target.Architectures.Contains(Abi == "arm64-v8a" ? UnrealArch.Arm64 : UnrealArch.X64))
+            {
+                continue;
+            }
+            string Library = Path.Combine(ThirdParty, "Android", Abi, Configuration,
+                "lib", "libAudioBusHackerFX.a");
+            if (!File.Exists(Library))
+            {
+                throw new BuildException("AkAudioSampler requires the AudioBusHacker Android static library: "
+                    + Library + ". Build AkSDK/AudioBusHacker/build_android.bat all with the matching "
+                    + "Wwise SDK, then deploy using --wwise-plugin <WwiseSoundEngine plugin directory>.");
+            }
+            PublicAdditionalLibraries.Add(Library);
+            ExternalDependencies.Add(Library);
+        }
     }
 }

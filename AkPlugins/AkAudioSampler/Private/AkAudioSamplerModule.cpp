@@ -12,7 +12,7 @@ IMPLEMENT_MODULE(FAkAudioSamplerModule, AkAudioSampler)
 
 DEFINE_LOG_CATEGORY_STATIC(LogAkAudioSampler, Log, All);
 
-#if PLATFORM_ANDROID
+#if PLATFORM_ANDROID && !AK_USE_NULL_SOUNDENGINE
 AK_STATIC_LINK_PLUGIN(AudioBusHackerFX);
 #endif
 
@@ -93,6 +93,11 @@ void FAkAudioSamplerModule::StartupModule()
 			Error,
 			TEXT("AudioBusHacker.dll with the visualization API was not found in WwiseSoundEngine/ThirdParty."));
 	}
+#elif PLATFORM_ANDROID && !AK_USE_NULL_SOUNDENGINE
+	// Use the same statically linked effect instance as the Wwise SoundEngine.
+	// Loading a second shared plugin would give it a different callback state.
+	SetVisualizationCallbackFunc = &SetAudioBusHackerVisualizationCallback;
+	UE_LOG(LogAkAudioSampler, Log, TEXT("Using statically linked AudioBusHacker visualization API (Android)."));
 #endif
 }
 
@@ -120,24 +125,12 @@ void FAkAudioSamplerModule::ShutdownModule()
 int32 FAkAudioSamplerModule::SetVisualizationCallback(
 	AkAudioBusHackerVisualizationCallbackFunc InCallback)
 {
-#if PLATFORM_WINDOWS
 	return SetVisualizationCallbackFunc ? SetVisualizationCallbackFunc(InCallback) : 1;
-#elif PLATFORM_ANDROID
-	return SetAudioBusHackerVisualizationCallback(InCallback);
-#else
-	return 1;
-#endif
 }
 
 bool FAkAudioSamplerModule::IsVisualizationCallbackAvailable()
 {
-#if PLATFORM_WINDOWS
 	return SetVisualizationCallbackFunc != nullptr;
-#elif PLATFORM_ANDROID
-	return true;
-#else
-	return false;
-#endif
 }
 
 bool FAkAudioSamplerModule::AcquireVisualizationCallback(
